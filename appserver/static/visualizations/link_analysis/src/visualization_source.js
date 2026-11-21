@@ -117,15 +117,15 @@
           // If there is only one configuration change (This happens after the first click of formatter menu)
           if (Object.keys(config).length == 1) {
             switch (changedConfig) {
-              case "display.visualizations.custom.link_analysis_app.link_analysis.layoutStyle":
+              case "display.visualizations.custom.licoryx_link_analysis_app.link_analysis.layoutStyle":
                 this.layoutStyle = this._getEscapedProperty('layoutStyle', config);
                 break;
 
-              case "display.visualizations.custom.link_analysis_app.link_analysis.pathAlgo":
+              case "display.visualizations.custom.licoryx_link_analysis_app.link_analysis.pathAlgo":
                 this.pathAlgo = this._getEscapedProperty('pathAlgo', config);
                 break;
 
-              case "display.visualizations.custom.link_analysis_app.link_analysis.directed":
+              case "display.visualizations.custom.licoryx_link_analysis_app.link_analysis.directed":
                 this.directed = SplunkVisualizationUtils.normalizeBoolean(this._getEscapedProperty('directed', config));
                 break;
 
@@ -176,19 +176,19 @@
           else {
             changedConfig = Object.keys(configChanges)[0];
             switch (changedConfig) {
-              case "display.visualizations.custom.link_analysis_app.link_analysis.layoutStyle":
+              case "display.visualizations.custom.licoryx_link_analysis_app.link_analysis.layoutStyle":
                 this.invalidateUpdateView();
                 break;
 
-              case "display.visualizations.custom.link_analysis_app.link_analysis.pathAlgo":
-                pathAlgoGlobal = configChanges["display.visualizations.custom.link_analysis_app.link_analysis.pathAlgo"];
+              case "display.visualizations.custom.licoryx_link_analysis_app.link_analysis.pathAlgo":
+                pathAlgoGlobal = configChanges["display.visualizations.custom.licoryx_link_analysis_app.link_analysis.pathAlgo"];
                 this._getConfigParams(configChanges);
                 break;
 
 
-              case "display.visualizations.custom.link_analysis_app.link_analysis.directed":
+              case "display.visualizations.custom.licoryx_link_analysis_app.link_analysis.directed":
 
-                directedGlobal = SplunkVisualizationUtils.normalizeBoolean(configChanges["display.visualizations.custom.link_analysis_app.link_analysis.directed"]);
+                directedGlobal = SplunkVisualizationUtils.normalizeBoolean(configChanges["display.visualizations.custom.licoryx_link_analysis_app.link_analysis.directed"]);
                 this._getConfigParams(configChanges);
                 break;
 

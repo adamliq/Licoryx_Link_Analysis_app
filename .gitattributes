@@ -1,0 +1,5 @@
+# Files excluded from the Splunk app package (git archive)
+.gitattributes export-ignore
+.gitignore export-ignore
+package.sh export-ignore
+dist/ export-ignore

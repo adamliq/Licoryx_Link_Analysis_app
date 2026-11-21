@@ -1,0 +1,54 @@
+{
+  "schemaVersion": "2.0.0",
+  "info": {
+    "title": "Licoryx Link Analysis App",
+    "id": {
+      "group": null,
+      "name": "licoryx_link_analysis_app",
+      "version": "2.0.0"
+    },
+    "author": [
+      {
+        "name": "Domenico Perre",
+        "email": null,
+        "company": null
+      }
+    ],
+    "releaseDate": null,
+    "description": "Licoryx Link Analysis App lets you visualise relationships between objects (for example network maps and attack paths) with the Cytoscape graph framework.",
+    "classification": {
+      "intendedAudience": "IT Operations, Security",
+      "categories": [],
+      "developmentStatus": "Production/Stable"
+    },
+    "commonInformationModels": null,
+    "license": {
+      "name": "MIT",
+      "text": "LICENSE",
+      "uri": "https://opensource.org/licenses/MIT"
+    },
+    "privacyPolicy": {
+      "name": null,
+      "text": null,
+      "uri": null
+    },
+    "releaseNotes": {
+      "name": "README",
+      "text": "README.md",
+      "uri": null
+    }
+  },
+  "dependencies": null,
+  "tasks": null,
+  "inputGroups": null,
+  "incompatibleApps": null,
+  "platformRequirements": null,
+  "supportedDeployments": [
+    "_standalone",
+    "_distributed",
+    "_search_head_clustering"
+  ],
+  "targetWorkloads": [
+    "_search_heads"
+  ]
+}

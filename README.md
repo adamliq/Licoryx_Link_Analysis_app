@@ -1,10 +1,14 @@
-# Link Analysis App For Splunk #
+# Licoryx Link Analysis App #
 This app provides a seperate visualisation framework for doing force directed visualisation with additional functionality.
 For more about the visualisation framework visit here.
 https://github.com/cytoscape/cytoscape.js
 ### Installation Instructions
-1. Download the app and unzip to $SPLUNK_HOME/etc/apps on your Search Head
-2. Restart Splunk
+#### Splunk Cloud
+Install the app package (`licoryx_link_analysis_app-<version>.tgz`) through *Apps > Manage Apps > Install app from file* (self-service app install) or request installation through Splunk Support.
+
+#### Splunk Enterprise
+1. Install the app package through *Apps > Manage Apps > Install app from file*, or extract it to `$SPLUNK_HOME/etc/apps` on your Search Head
+2. Restart Splunk if prompted
 3. Generate a search that has a 'source', 'target' and optionally a count. 
 
 ### Basic Search Examples
@@ -18,13 +22,13 @@ https://github.com/cytoscape/cytoscape.js
 ```index=firewall action=allowed | stats count by src_ip, dest_ip, dest_port | rename dest_port as line_label```
 ***Will make the destination port the line label***
 - line_color - To specify a color of an edge
-```index=firewall action=allowed | stats count by src_ip, dest_ip | eval line_color=if(count>10,"red","green"```
+```index=firewall action=allowed | stats count by src_ip, dest_ip | eval line_color=if(count>10,"red","green")```
 ***If count is greater than 10 make the line red else make it green.***
 - remove - For huge graphs, it is often faster to remove all nodes off of the graph and start with only one node on the graph.  All nodes that have any children can be expanded from here.
-```index=firewall action=allowed | stats count by src_ip, dest_ip | eval remove="192.168.1.1```
-***Remove all nodes from the graph except 192.168.1.1, if 192.168.1.1 is clicked the children will be re-added to the graph***
+```index=firewall action=allowed | stats count by src_ip, dest_ip | eval remove="server01"```
+***Remove all nodes from the graph except server01, if server01 is clicked the children will be re-added to the graph***
 - preFilter - Allows you to prefilter your graph and remove all nodes that are connected to the node specified in the field.
-***Delete all nodes from the graph that are not children of 192.168.1.1***
+***Delete all nodes from the graph that are not children of server01***
 
 ### Configuration Options
 
@@ -92,7 +96,13 @@ Please report any bugs to github, Splunk Answers or alternatively hit me up on t
 Post any feature requests as issues and I will look around to them.  My only feedback prior to making feature requests is ensuring that the feature does not reduce the flexibility of the app :).
 
 ### Tested on
-**Mac**
+- Splunk Enterprise 9.4 (Docker `splunk/splunk:9.4`)
+- Splunk AppInspect (cloud tags) - no failures
+
+### Release Notes
+#### 2.0.0
+- App renamed to **Licoryx Link Analysis App** (app id `licoryx_link_analysis_app`). Visualization settings are now under `display.visualizations.custom.licoryx_link_analysis_app.link_analysis.*`. Searches/dashboards that referenced `link_analysis_app.link_analysis` must be updated to `licoryx_link_analysis_app.link_analysis`.
+- Splunk Cloud compliance: removed deprecated HTML dashboards and sample views, Simple XML dashboards set to `version="1.1"`, `[id]` stanza and `app.manifest` added, `sc_admin` granted write access, removed debug statements.
 
 ### License
 - This app uses D3 with the following license conditions

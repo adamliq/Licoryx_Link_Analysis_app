@@ -1,14 +1,14 @@
 {
-  "name": "standin",
-  "version": "1.0.0",
-  "description": "Visualization app template. Put a description here.",
+  "name": "licoryx-link-analysis",
+  "version": "2.0.0",
+  "description": "Link analysis custom visualization for the Licoryx Link Analysis App",
   "main": "visualization.js",
   "scripts": {
     "build": "/opt/splunk/bin/splunk cmd node ./node_modules/webpack/bin/webpack.js",
     "devbuild": "/opt/splunk/bin/splunk cmd node ./node_modules/webpack/bin/webpack.js --progress",
     "watch": "/opt/splunk/bin/splunk cmd node ./node_modules/webpack/bin/webpack.js -d --watch --progress"
   },
-  "author": "Splunk",
+  "author": "Domenico Perre",
   "license": "MIT",
   "devDependencies": {
     "webpack": "^1.12.6"
