@@ -162,15 +162,15 @@ define(["api/SplunkVisualizationBase","api/SplunkVisualizationUtils"], function(
 	          // If there is only one configuration change (This happens after the first click of formatter menu)
 	          if (Object.keys(config).length == 1) {
 	            switch (changedConfig) {
-	              case "display.visualizations.custom.link_analysis_app.link_analysis.layoutStyle":
+	              case "display.visualizations.custom.licoryx_link_analysis_app.link_analysis.layoutStyle":
 	                this.layoutStyle = this._getEscapedProperty('layoutStyle', config);
 	                break;
 
-	              case "display.visualizations.custom.link_analysis_app.link_analysis.pathAlgo":
+	              case "display.visualizations.custom.licoryx_link_analysis_app.link_analysis.pathAlgo":
 	                this.pathAlgo = this._getEscapedProperty('pathAlgo', config);
 	                break;
 
-	              case "display.visualizations.custom.link_analysis_app.link_analysis.directed":
+	              case "display.visualizations.custom.licoryx_link_analysis_app.link_analysis.directed":
 	                this.directed = SplunkVisualizationUtils.normalizeBoolean(this._getEscapedProperty('directed', config));
 	                break;
 
@@ -221,19 +221,19 @@ define(["api/SplunkVisualizationBase","api/SplunkVisualizationUtils"], function(
 	          else {
 	            changedConfig = Object.keys(configChanges)[0];
 	            switch (changedConfig) {
-	              case "display.visualizations.custom.link_analysis_app.link_analysis.layoutStyle":
+	              case "display.visualizations.custom.licoryx_link_analysis_app.link_analysis.layoutStyle":
 	                this.invalidateUpdateView();
 	                break;
 
-	              case "display.visualizations.custom.link_analysis_app.link_analysis.pathAlgo":
-	                pathAlgoGlobal = configChanges["display.visualizations.custom.link_analysis_app.link_analysis.pathAlgo"];
+	              case "display.visualizations.custom.licoryx_link_analysis_app.link_analysis.pathAlgo":
+	                pathAlgoGlobal = configChanges["display.visualizations.custom.licoryx_link_analysis_app.link_analysis.pathAlgo"];
 	                this._getConfigParams(configChanges);
 	                break;
 
 
-	              case "display.visualizations.custom.link_analysis_app.link_analysis.directed":
+	              case "display.visualizations.custom.licoryx_link_analysis_app.link_analysis.directed":
 
-	                directedGlobal = SplunkVisualizationUtils.normalizeBoolean(configChanges["display.visualizations.custom.link_analysis_app.link_analysis.directed"]);
+	                directedGlobal = SplunkVisualizationUtils.normalizeBoolean(configChanges["display.visualizations.custom.licoryx_link_analysis_app.link_analysis.directed"]);
 	                this._getConfigParams(configChanges);
 	                break;
 
@@ -94480,7 +94480,6 @@ define(["api/SplunkVisualizationBase","api/SplunkVisualizationUtils"], function(
 
 	var __WEBPACK_AMD_DEFINE_ARRAY__, __WEBPACK_AMD_DEFINE_RESULT__;'use strict';
 
-	console.log("Trying again", [].slice.call(document.querySelectorAll('script[src]')).pop().src.replace(/.*?static\/app\/([^\/]*).*/, "$1"))
 	var _typeof = typeof Symbol === "function" && typeof Symbol.iterator === "symbol" ? function(obj) { return typeof obj; } : function(obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol ? "symbol" : typeof obj; };
 
 	var _createClass = function() {

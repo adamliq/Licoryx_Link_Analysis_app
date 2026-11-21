@@ -1,8 +1,12 @@
+// Resolve the app's static path relative to the current locale / root_endpoint
+// (e.g. /en-US/static/app/... or /<root>/en-US/static/app/...)
+var licoryxStaticRoot = window.location.pathname.split('/app/')[0] + '/static/app/licoryx_link_analysis_app';
+
 require(["jquery",
         "splunkjs/ready!",
         "splunkjs/mvc/utils",
         "splunkjs/mvc/searchmanager",
-        "/static/app/link_analysis_app/scripts/cytoscape.min.js",
+        licoryxStaticRoot + "/scripts/cytoscape.min.js",
         'api/SplunkVisualizationUtils'
     ],
     function (
@@ -15,7 +19,6 @@ require(["jquery",
     ) {
         var desiredSearchName = "cytoState";
         var cyto_viz;
-        debugger;
         var sm = splunkjs.mvc.Components.getInstance(desiredSearchName);
         sm.on('search:done', function (properties) {
             var searchName = properties.content.request.label;
@@ -31,7 +34,6 @@ require(["jquery",
                     var searchName = properties.attributes.manager.id;
                     var data = properties.data().results;
                     cyto_viz = JSON.parse(properties.data().results[0]["_raw"]);
-                    debugger;
                     var cy = cytoscape({
                         container: document.getElementById('cy') // container to render in
                     });
@@ -70,15 +72,9 @@ require(["jquery",
                         }).update();
 
 
-                        debugger;
                     layout.run();
                 })
             }
         });
 
-
-        // If you wanted to implement this without jQuery, you could do this:
-        // document.getElementById("results").innerHTML = "<p>Hello world!</p>"
-        // but jQuery makes things so easy. Easiest to get in the habit!
     })
-//# sourceURL=ex00-hello-world.js
