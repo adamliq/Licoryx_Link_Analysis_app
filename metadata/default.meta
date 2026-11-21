@@ -13,3 +13,6 @@ export = system
 
 [visualizations/link_analysis]
 export = system
+
+[visualizations/link_analysis_studio]
+export = system

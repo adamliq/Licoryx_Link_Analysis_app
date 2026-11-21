@@ -3,3 +3,4 @@
 .gitignore export-ignore
 package.sh export-ignore
 dist/ export-ignore
+studio/ export-ignore

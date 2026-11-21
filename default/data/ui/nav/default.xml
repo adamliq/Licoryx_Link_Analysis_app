@@ -1,5 +1,6 @@
 <nav search_view="search">
   <view name="search" default="true" />
+  <view name="link_analysis_explorer" />
   <view name="link_analysis_historical_view" />
   <view name="dashboards" />
 </nav>
