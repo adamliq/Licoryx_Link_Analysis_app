@@ -1,0 +1,87 @@
+<dashboard version="2" theme="dark">
+    <label>Link Analysis Explorer</label>
+    <description>Explore relationships with the Licoryx Link Analysis visualization.</description>
+    <definition><![CDATA[
+{
+    "title": "Link Analysis Explorer",
+    "description": "Enter a search that returns a source, a target and optionally a count (plus optional line_label / line_color fields).",
+    "inputs": {
+        "input_search": {
+            "type": "input.text",
+            "title": "Search (source, target, count)",
+            "options": {
+                "token": "spl",
+                "defaultValue": "| makeresults count=40\n| streamstats count as n\n| eval src_ip=\"10.0.\".(n%5).\".\".(n%7), dest_ip=\"dc-\".(n%4), count=n\n| table src_ip dest_ip count"
+            }
+        },
+        "input_time": {
+            "type": "input.timerange",
+            "title": "Time range",
+            "options": {
+                "token": "tr",
+                "defaultValue": "-24h@h,now"
+            }
+        }
+    },
+    "dataSources": {
+        "ds_graph": {
+            "type": "ds.search",
+            "name": "Graph search",
+            "options": {
+                "query": "$spl$",
+                "queryParameters": {
+                    "earliest": "$tr.earliest$",
+                    "latest": "$tr.latest$"
+                }
+            }
+        }
+    },
+    "visualizations": {
+        "viz_graph": {
+            "type": "licoryx_link_analysis_app.link_analysis_studio",
+            "title": "Link Analysis",
+            "dataSources": {
+                "primary": "ds_graph"
+            },
+            "options": {
+                "layoutStyle": "fcose",
+                "pathAlgo": "dijkstra",
+                "directed": false,
+                "recursiveLookup": true
+            }
+        }
+    },
+    "layout": {
+        "type": "grid",
+        "options": {
+            "width": 1440,
+            "height": 960
+        },
+        "globalInputs": [
+            "input_time",
+            "input_search"
+        ],
+        "structure": [
+            {
+                "item": "viz_graph",
+                "type": "block",
+                "position": {
+                    "x": 0,
+                    "y": 0,
+                    "w": 1440,
+                    "h": 800
+                }
+            }
+        ]
+    },
+    "defaults": {}
+}
+    ]]></definition>
+    <meta type="hiddenElements"><![CDATA[
+{
+    "hideEdit": false,
+    "hideOpenInSearch": false,
+    "hideExport": false
+}
+    ]]></meta>
+</dashboard>

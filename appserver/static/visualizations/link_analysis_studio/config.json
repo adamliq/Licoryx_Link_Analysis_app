@@ -1,0 +1,139 @@
+{
+  "showTitleAndDescription": true,
+  "includeInToolbar": true,
+  "includeInVizSwitcher": true,
+  "showDrilldown": true,
+  "canSetTokens": [
+    "dynamic"
+  ],
+  "hasEventHandlers": true,
+  "config": {
+    "name": "Licoryx Link Analysis",
+    "description": "Visualize relationships between objects (e.g. network maps and attack paths). Search for a source, a target and optionally a count: | table src_ip, dest_ip, count. Also renders graphs saved with Save State (sourcetype cyto:graph).",
+    "category": "Custom",
+    "icon": null,
+    "dataContract": {
+      "requiredDataSources": [
+        "primary"
+      ],
+      "optionalDataSources": []
+    },
+    "size": {
+      "initialWidth": 800,
+      "initialHeight": 600
+    },
+    "optionsSchema": {
+      "layoutStyle": {
+        "type": "string",
+        "default": "fcose"
+      },
+      "pathAlgo": {
+        "type": "string",
+        "default": "dijkstra"
+      },
+      "directed": {
+        "type": "boolean",
+        "default": false
+      },
+      "recursiveLookup": {
+        "type": "boolean",
+        "default": true
+      }
+    },
+    "editorConfig": [
+      {
+        "label": "Visualization Style",
+        "layout": [
+          [
+            {
+              "label": "Layout Style",
+              "editor": "editor.select",
+              "option": "layoutStyle",
+              "editorProps": {
+                "values": [
+                  {
+                    "label": "fcose",
+                    "value": "fcose"
+                  },
+                  {
+                    "label": "grid",
+                    "value": "grid"
+                  },
+                  {
+                    "label": "circle",
+                    "value": "circle"
+                  },
+                  {
+                    "label": "klay",
+                    "value": "klay"
+                  },
+                  {
+                    "label": "dagre",
+                    "value": "dagre"
+                  },
+                  {
+                    "label": "concentric",
+                    "value": "concentric"
+                  },
+                  {
+                    "label": "breadthfirst",
+                    "value": "breadthfirst"
+                  },
+                  {
+                    "label": "cose",
+                    "value": "cose"
+                  },
+                  {
+                    "label": "cose-bilkent",
+                    "value": "cose-bilkent"
+                  }
+                ]
+              }
+            }
+          ],
+          [
+            {
+              "label": "Path Selection Algorithm",
+              "editor": "editor.select",
+              "option": "pathAlgo",
+              "editorProps": {
+                "values": [
+                  {
+                    "label": "dijkstra",
+                    "value": "dijkstra"
+                  },
+                  {
+                    "label": "aStar",
+                    "value": "aStar"
+                  },
+                  {
+                    "label": "floydWarshall",
+                    "value": "floydWarshall"
+                  },
+                  {
+                    "label": "bellmanFord",
+                    "value": "bellmanFord"
+                  }
+                ]
+              }
+            }
+          ],
+          [
+            {
+              "label": "Path Selection Directed",
+              "editor": "editor.checkbox",
+              "option": "directed"
+            }
+          ],
+          [
+            {
+              "label": "Recursive Graph Addition",
+              "editor": "editor.checkbox",
+              "option": "recursiveLookup"
+            }
+          ]
+        ]
+      }
+    ]
+  }
+}

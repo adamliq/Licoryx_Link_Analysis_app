@@ -1266,7 +1266,7 @@ define(["api/SplunkVisualizationBase","api/SplunkVisualizationUtils"], function(
 	              cy.fit(node_id);
 	            } else if (initialRun == false) {
 	              // Do nothing routine
-	              pass
+	              // nothing to do
 	            } else {
 	              cy.fit()
 	            }
@@ -1494,7 +1494,7 @@ define(["api/SplunkVisualizationBase","api/SplunkVisualizationUtils"], function(
 	                myModal.body
 	                  .append($('<h4>HTTP Destination</h4>'));
 	                myModal.body
-	                  .append($('<input type="text" id="http_destination" autocomplete="on" name="http_destination" value="https://yoursplunkserver.com:8089/services/collector" required>'));
+	                  .append($('<input type="text" id="http_destination" autocomplete="on" name="http_destination" value="https://yoursplunkserver.com:8088/services/collector" required>'));
 
 	                myModal.body
 	                  .append($('<h4>Description</h4>'));
@@ -1684,6 +1684,7 @@ define(["api/SplunkVisualizationBase","api/SplunkVisualizationUtils"], function(
 	                "graph_info": message,
 	                "graph_id": makeid()
 	              },
+	              "index": "cyto",
 	              "sourcetype": "cyto:graph"
 	            };
 	            xhttp.open("POST", url, true);

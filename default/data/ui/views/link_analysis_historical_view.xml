@@ -1,29 +1,97 @@
-<form version="1.1" script="./cytoStateN.js" stylesheet="cytostate.css" theme="dark">
-  <label>Link Analysis Historical View</label>
-  <search id="cytoState">
-    <query>index=cyto sourcetype=cyto:graph graph_id=$cytoId$</query>
-    <earliest>-365d@h</earliest>
-    <latest>now</latest>
-  </search>
-  <fieldset submitButton="false" autoRun="false">
-    <input type="dropdown" token="cytoId" searchWhenChanged="true">
-      <label>Previous State</label>
-      <fieldForLabel>desc_time</fieldForLabel>
-      <fieldForValue>graph_id</fieldForValue>
-      <search>
-        <query>index=cyto graph_id=*  sourcetype=cyto:graph | eval time = strftime(_time, "%c") | strcat description " : " time " : " graph_id desc_time | dedup desc_time</query>
-        <earliest>-365d@d</earliest>
-        <latest>now</latest>
-      </search>
-    </input>
-  </fieldset>
-  <row>
-    <panel depends="$cytoId$">
-      <title>Load Former State</title>
-      <html>
-                  <div id="cy">   
-                  </div>
-            </html>
-    </panel>
-  </row>
-</form>
+<dashboard version="2" theme="dark">
+    <label>Link Analysis Historical View</label>
+    <description>Load a graph previously saved with the Save State menu.</description>
+    <definition><![CDATA[
+{
+    "title": "Link Analysis Historical View",
+    "description": "Load a graph previously saved with the Save State menu (index=cyto, sourcetype=cyto:graph).",
+    "inputs": {
+        "input_state": {
+            "type": "input.dropdown",
+            "title": "Previous State",
+            "options": {
+                "items": ">frame(label, value) | prepend(formattedStatics) | objects()",
+                "token": "cytoId"
+            },
+            "dataSources": {
+                "primary": "ds_states"
+            },
+            "context": {
+                "formattedConfig": {
+                    "number": {
+                        "prefix": ""
+                    }
+                },
+                "formattedStatics": ">statics | formatByType(formattedConfig)",
+                "statics": [],
+                "label": ">primary | seriesByName(\"label\") | renameSeries(\"label\") | formatByType(formattedConfig)",
+                "value": ">primary | seriesByName(\"value\") | renameSeries(\"value\") | formatByType(formattedConfig)"
+            }
+        }
+    },
+    "dataSources": {
+        "ds_states": {
+            "type": "ds.search",
+            "name": "Saved states",
+            "options": {
+                "query": "index=cyto sourcetype=cyto:graph graph_id=*\n| eval label=description.\" : \".strftime(_time, \"%c\").\" : \".graph_id, value=graph_id\n| dedup value\n| table label value",
+                "queryParameters": {
+                    "earliest": "-365d@d",
+                    "latest": "now"
+                }
+            }
+        },
+        "ds_state": {
+            "type": "ds.search",
+            "name": "Selected state",
+            "options": {
+                "query": "index=cyto sourcetype=cyto:graph graph_id=\"$cytoId$\"\n| head 1\n| table _raw",
+                "queryParameters": {
+                    "earliest": "-365d@h",
+                    "latest": "now"
+                }
+            }
+        }
+    },
+    "visualizations": {
+        "viz_state": {
+            "type": "licoryx_link_analysis_app.link_analysis_studio",
+            "title": "Load Former State",
+            "dataSources": {
+                "primary": "ds_state"
+            }
+        }
+    },
+    "layout": {
+        "type": "grid",
+        "options": {
+            "width": 1440,
+            "height": 960
+        },
+        "globalInputs": [
+            "input_state"
+        ],
+        "structure": [
+            {
+                "item": "viz_state",
+                "type": "block",
+                "position": {
+                    "x": 0,
+                    "y": 0,
+                    "w": 1440,
+                    "h": 800
+                }
+            }
+        ]
+    },
+    "defaults": {}
+}
+    ]]></definition>
+    <meta type="hiddenElements"><![CDATA[
+{
+    "hideEdit": false,
+    "hideOpenInSearch": false,
+    "hideExport": false
+}
+    ]]></meta>
+</dashboard>
