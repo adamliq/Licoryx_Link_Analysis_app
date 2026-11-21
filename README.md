@@ -139,6 +139,9 @@ npm run build   # bundles with esbuild and copies to appserver/static/visualizat
 Then run `./package.sh` from the repository root to create `dist/licoryx_link_analysis_app-<version>.tgz`.
 
 ### Release Notes
+#### 2.1.1
+- New app icon (source SVGs in `studio/icon/`).
+
 #### 2.1.0
 - New **Dashboard Studio** visualization (`link_analysis_studio`, `framework_type = studio_visualization`) built on the Dashboard Studio extension framework, with dropdown option editors, theme support, drilldown and saved-state rendering.
 - **Link Analysis Historical View** converted to a Dashboard Studio dashboard (no custom dashboard JavaScript); new **Link Analysis Explorer** Studio dashboard.
