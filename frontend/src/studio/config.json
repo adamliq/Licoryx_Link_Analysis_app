@@ -38,6 +38,10 @@
       "recursiveLookup": {
         "type": "boolean",
         "default": true
+      },
+      "maxRows": {
+        "type": "number",
+        "default": 10000
       }
     },
     "editorConfig": [
@@ -130,6 +134,13 @@
               "label": "Recursive Graph Addition",
               "editor": "editor.checkbox",
               "option": "recursiveLookup"
+            }
+          ],
+          [
+            {
+              "label": "Maximum rows (1-50000)",
+              "editor": "editor.number",
+              "option": "maxRows"
             }
           ]
         ]

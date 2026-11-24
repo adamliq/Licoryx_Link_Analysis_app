@@ -1,12 +1,11 @@
 /*
- * Licoryx Link Analysis - core visualization logic (Dashboard Studio build).
- *
- * Ported from appserver/static/visualizations/link_analysis/src/visualization_source.js
- * (classic SplunkVisualizationBase viz). The Studio entry point (visualization.js)
+ * Licoryx Link Analysis - core visualization logic, shared by both builds:
+ *   - src/classic/visualization.js  -> classic (legacy framework) viz, search page + Classic dashboards
+ *   - src/studio/visualization.js   -> Dashboard Studio extension-framework viz
+ * Written against the classic SplunkVisualizationBase API; the Studio entry point
  * supplies small stand-ins for SplunkVisualizationBase / SplunkVisualizationUtils.
  */
 import $ from 'jquery';
-import _ from 'underscore';
 import cytoscape from 'cytoscape';
 import cxtmenu from 'cytoscape-cxtmenu';
 import fcose from 'cytoscape-fcose';
@@ -18,7 +17,36 @@ import Modal from './Modal.js';
 import coseBilkent from 'cytoscape-cose-bilkent';
 import dblclick from 'cytoscape-dblclick';
 
-export default function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils) {
+// Register Cytoscape extensions once per page.
+cxtmenu(cytoscape);
+fcose(cytoscape);
+dagre(cytoscape);
+popper(cytoscape);
+klay(cytoscape);
+coseBilkent(cytoscape);
+dblclick(cytoscape);
+
+let instanceCounter = 0;
+
+/**
+ * Builds the visualization class. Each call creates a fresh closure, so the
+ * module-level state below is private to one visualization instance. Use
+ * createLinkAnalysisClass() (bottom of this file) which does this per instance.
+ *
+ * @param {object} SplunkVisualizationBase  classic api/SplunkVisualizationBase or a stand-in
+ * @param {object} SplunkVisualizationUtils classic api/SplunkVisualizationUtils or a stand-in
+ * @param {object} [features]
+ * @param {boolean} [features.kvstore]   offer "Save to Splunk (KV store)" in Save State
+ * @param {function} [features.saveToKvStore] (record) => Promise; required when kvstore is true
+ */
+function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, features) {
+  features = features || {};
+  instanceCounter += 1;
+  var UID = 'lla' + instanceCounter;
+  var CY_ID = UID + '-cy';
+  var NODE_LIST_ID = UID + '-node_list';
+  var MENU_LIST_ID = UID + '-menu_list';
+  var RESET_VIEW_ID = UID + '-reset_view';
 
   // Shared state. The classic build relied on implicit (sloppy-mode) globals for these;
   // they are declared here so the module runs in strict mode.
@@ -67,19 +95,6 @@ export default function createLinkAnalysis(SplunkVisualizationBase, SplunkVisual
       startid_hash,
       target_out,
       totalNodes;
-      // Load menu extension
-      cxtmenu(cytoscape);
-      // Load FCose Layout Extension
-      fcose(cytoscape);
-      // Load Dagre Layout Extension
-      dagre(cytoscape);
-      // Load Popper Extension
-      popper(cytoscape);
-      // Load Dagre Layout Extension
-      klay(cytoscape);
-      // Load Cose Bilkent Layout Extension
-      coseBilkent(cytoscape); // register extension
-      dblclick(cytoscape);
 
 
       /*
@@ -128,6 +143,12 @@ export default function createLinkAnalysis(SplunkVisualizationBase, SplunkVisual
             bgColor = undefined;
             textColor = undefined;
           }
+          // Optional explicit background (e.g. Dashboard Studio's panel background colour).
+          var customBg = SplunkVisualizationUtils.getBackgroundColor && SplunkVisualizationUtils.getBackgroundColor();
+          if (customBg) {
+            bgColor = customBg;
+            textColor = isDarkColor(customBg) ? "#ffffff" : "#000000";
+          }
 
         },
         // Escape properties that are passed as configuration items
@@ -153,6 +174,10 @@ export default function createLinkAnalysis(SplunkVisualizationBase, SplunkVisual
                 this.directed = SplunkVisualizationUtils.normalizeBoolean(this._getEscapedProperty('directed', config));
                 break;
 
+              case "display.visualizations.custom.licoryx_link_analysis_app.link_analysis.maxRows":
+                this.maxRows = parseMaxRows(this._getEscapedProperty('maxRows', config));
+                break;
+
               default:
                 // Set default options for the console if this is a fresh load or something else happened.
                 this.layoutStyle = this._getEscapedProperty('layoutStyle', config) || 'fcose';
@@ -164,6 +189,7 @@ export default function createLinkAnalysis(SplunkVisualizationBase, SplunkVisual
                   default: false
                 });
                 recursiveLookup = this.recursiveLookup;
+                this.maxRows = parseMaxRows(this._getEscapedProperty('maxRows', config));
 
 
                 break;
@@ -180,6 +206,7 @@ export default function createLinkAnalysis(SplunkVisualizationBase, SplunkVisual
               default: false
             });
             recursiveLookup = this.recursiveLookup;
+            this.maxRows = parseMaxRows(this._getEscapedProperty('maxRows', config));
 
 
             return;
@@ -227,6 +254,12 @@ export default function createLinkAnalysis(SplunkVisualizationBase, SplunkVisual
         // Optionally implement to format data returned from search.
         // The returned object will be passed to updateView as 'data'
         formatData: function (data, config) {
+          // Limit the number of rows drawn (option maxRows); remember the original count for a warning.
+          var limit = parseMaxRows(this._getEscapedProperty('maxRows', config));
+          this.totalRows = data.rows.length;
+          if (data.rows.length > limit) {
+            data = { fields: data.fields, rows: data.rows.slice(0, limit), meta: data.meta };
+          }
           // A dictionary for formatting
           this.format_info = {};
           // Create nodes dictionary for ID creation purposes.
@@ -243,6 +276,10 @@ export default function createLinkAnalysis(SplunkVisualizationBase, SplunkVisual
           var linksArray = [];
           // Get updated configuration parameters
           this._getConfigParams(config);
+          // Remember the source / target field names and which names appear as a source (for drilldown)
+          this.srcField = data.fields[0] && data.fields[0].name;
+          this.destField = data.fields[1] && data.fields[1].name;
+          this.srcNames = new Set(data.rows.map(function (r) { return r[0]; }));
 
           // Update group items
           // For each field in the output if the regex matches the pattern variable push it to the columns array
@@ -368,6 +405,7 @@ export default function createLinkAnalysis(SplunkVisualizationBase, SplunkVisual
 
           // Get configuration
           this._getConfigParams(config);
+          this._renderRowLimitWarning(data.rows.length);
 
           // Take the first data point
           datum = data.rows;
@@ -419,7 +457,7 @@ export default function createLinkAnalysis(SplunkVisualizationBase, SplunkVisual
           var width = this.$el.width()
           var height = this.$el.height()
           // Check to see if cy element exists
-          var getCy = document.getElementById("cy")
+          var getCy = document.getElementById(CY_ID)
           // If the cy element is null then
           if (getCy == null) {
             // Specify a width and height that matches the Splunk console
@@ -428,13 +466,18 @@ export default function createLinkAnalysis(SplunkVisualizationBase, SplunkVisual
               .append("div")
               .attr('width', width)
               .attr('height', height)
-              .attr('id', 'cy')
+              .attr('id', CY_ID)
+              .attr('class', 'lla-cy')
               .attr('active-bg-color', '#555');
           }
 
           // Add Cytoscape Element
+          if (this._cy) {
+            this._cy.destroy();
+            this._cy = null;
+          }
           var cy = cytoscape({
-            container: document.getElementById('cy'),
+            container: document.getElementById(CY_ID),
             style: [{
               selector: 'node',
               style: {
@@ -442,6 +485,8 @@ export default function createLinkAnalysis(SplunkVisualizationBase, SplunkVisual
               }
             }]
           });
+          // Keep a reference for resize and for destroying it on the next render.
+          this._cy = cy;
           // If a group count exists
           if (groupCount) {
             // Return group counts which have a rollup value of greater than 1
@@ -869,37 +914,32 @@ export default function createLinkAnalysis(SplunkVisualizationBase, SplunkVisual
               cy.$(elemsWChildren).addClass('nodehighlightedchildren')
             }
 
-            // If the node list and menus do not exist, add them.
-            if (document.getElementById('node_list') == undefined) {
-              // Create a Datalist for the search nodes
-              var nodeListDataList = document.createElement("datalist");
-              nodeListDataList.setAttribute("id", "node_list");
-              document.body.appendChild(nodeListDataList);
+            // (Re)build this instance's node and menu suggestion lists on every render,
+            // so they always match the current data.
+            [NODE_LIST_ID, MENU_LIST_ID].forEach(function (listId) {
+              var existing = document.getElementById(listId);
+              if (existing) existing.remove();
+            });
+            var nodeListDataList = document.createElement("datalist");
+            nodeListDataList.setAttribute("id", NODE_LIST_ID);
+            nodesUnique.forEach(function (node) {
+              var option = document.createElement('option');
+              option.value = node;
+              nodeListDataList.appendChild(option);
+            });
+            document.body.appendChild(nodeListDataList);
 
-              // Add nodes to list
-              var list = document.getElementById('node_list');
-              nodesUnique.forEach(function (node) {
-                var option = document.createElement('option');
-                option.value = node;
-                list.appendChild(option);
-              });
+            var menuDataList = document.createElement("datalist");
+            menuDataList.setAttribute("id", MENU_LIST_ID);
+            menu_list_items = ['Delete Highlighted Items', 'Delete Non-Highlighted Items', 'Refresh', 'Clear Formatting', 'Save State', 'Style Edges'];
+            menu_list_items = menu_list_items.sort()
+            menu_list_items.forEach(function (item) {
+              var option = document.createElement('option');
+              option.value = item;
+              menuDataList.appendChild(option);
+            });
+            document.body.appendChild(menuDataList);
 
-              // Create a list element
-              var menuDataList = document.createElement("datalist");
-              menuDataList.setAttribute("id", "menu_list");
-              document.body.appendChild(menuDataList);
-
-              // Add Menu Items
-              menu_list_items = ['Delete Highlighted Items', 'Delete Non-Highlighted Items', 'Refresh', 'Clear Formatting', 'Save State', 'Style Edges'];
-              menu_list_items = menu_list_items.sort()
-              var list = document.getElementById('menu_list');
-              menu_list_items.forEach(function (item) {
-                var option = document.createElement('option');
-                option.value = item;
-                list.appendChild(option);
-              });
-
-            }
             // Add box highlight function
             cy.on('box', function (e) {
               let node = e.target;
@@ -1013,7 +1053,7 @@ export default function createLinkAnalysis(SplunkVisualizationBase, SplunkVisual
                         // Create an input box
                         var x = document.createElement("button");
                         x.setAttribute("name", "reset_view");
-                        x.setAttribute("id", "reset_view");
+                        x.setAttribute("id", RESET_VIEW_ID);
                         x.setAttribute("class", "btn  btn-primary")
                         x.innerHTML = "Reset";
                         x.setAttribute("style", "z-index:9999");
@@ -1031,7 +1071,7 @@ export default function createLinkAnalysis(SplunkVisualizationBase, SplunkVisual
                           isZoomedIn = undefined;
                           layoutStatic.run();
                           // Delete the button after using
-                          var element = document.getElementById('reset_view');
+                          var element = document.getElementById(RESET_VIEW_ID);
                           element.parentNode.removeChild(element);
                         }, false);;
                         document.body.appendChild(x);
@@ -1148,7 +1188,7 @@ export default function createLinkAnalysis(SplunkVisualizationBase, SplunkVisual
                         'name': 'node_search',
                         'id': 'node_search',
                         'type': 'text',
-                        'list': 'node_list',
+                        'list': NODE_LIST_ID,
                         'style': 'z-index:9999'
                       }));
 
@@ -1183,7 +1223,7 @@ export default function createLinkAnalysis(SplunkVisualizationBase, SplunkVisual
                         'name': 'menu_select',
                         'id': 'menu_select',
                         'type': 'text',
-                        'list': 'menu_list',
+                        'list': MENU_LIST_ID,
                         'style': 'z-index:9999'
                       }).addClass('table table-striped table-hover'));
 
@@ -1257,18 +1297,43 @@ export default function createLinkAnalysis(SplunkVisualizationBase, SplunkVisual
           const interval = 300;
           cy.dblclick(interval);
 
+          // Double-click drilldown: report the clicked node (by its source/target
+          // field name) or edge (both field names) so dashboards can use
+          // $click.name$ / $click.value$ (classic) or the Studio drilldown payload.
           cy.on('dblclick', function (e) {
-            this.drilldownToCategory('_raw', 'test', e);
+            var target = e.target;
+            if (!target || target === cy || typeof target.isNode !== 'function') return;
+            var srcField = this.srcField || 'source';
+            var destField = this.destField || 'target';
+            var data = {};
+            if (target.isNode()) {
+              var label = target.data('label');
+              var field = this.srcNames && this.srcNames.has(label) ? srcField : destField;
+              data[field] = label;
+            } else {
+              data[srcField] = target.source().data('label');
+              data[destField] = target.target().data('label');
+            }
+            this.drilldownTo(data, e.originalEvent);
           }.bind(this));
 
           // End - Add Menu for nodes and background
 
 
-          function searchNodes(ele) {
-            document.getElementById("node_search").value;
-            var node_value = document.getElementById("node_search").value;
-            if (nodesByName[node_value]) {
-              node_id = "#" + nodesByName[node_value].id;
+          function searchNodes() {
+            var input = document.getElementById("node_search");
+            var node_value = input ? String(input.value).trim() : '';
+            var match = nodesByName[node_value];
+            if (!match && node_value) {
+              // Fall back to a case-insensitive exact match, then a substring match.
+              var lower = node_value.toLowerCase();
+              var names = Object.keys(nodesByName);
+              var found = names.find(function (n) { return String(n).toLowerCase() === lower; }) ||
+                names.find(function (n) { return String(n).toLowerCase().indexOf(lower) !== -1; });
+              if (found) match = nodesByName[found];
+            }
+            if (match && cy.getElementById(String(match.id)).length) {
+              node_id = "#" + match.id;
               // Zoom in to the node naturally
               cy.animate({
                 zoom: 1,
@@ -1277,18 +1342,9 @@ export default function createLinkAnalysis(SplunkVisualizationBase, SplunkVisual
                 }
               }, {
                 duration: 1000
-
               });
-              // Adjust view to ensure that the node is ~ centre
               cy.$(node_id).flashClass('nodehighlighted', 2500);
-
             }
-            // Delete the search box
-            var element = document.getElementById('node_search');
-            element.parentNode.removeChild(element);
-            var data_node_list = document.getElementById("node_list");
-            data_node_list.remove(data_node_list);
-
           }
 
           // Begin - Path Highlighting Function
@@ -1447,53 +1503,8 @@ export default function createLinkAnalysis(SplunkVisualizationBase, SplunkVisual
                 break;
 
               case "Save State":
-                // deleteElement('menu_list')
                 deleteElement('menu_select')
-
-                // Create Modal for HTTP Save State
-                var myModal = new Modal("modal1", {
-                  title: "Save State",
-                  backdrop: 'static',
-                  keyboard: false,
-                  destroyOnHide: true,
-                  type: 'normal'
-                });
-                /*
-                $(myModal.$el).on("hide", function() {
-                })*/
-                myModal.body
-                  .append($('<p>This menu allows you to save state of your diagram</p>'));
-
-
-                myModal.body
-                  .append($('<h4>HTTP Event Code</h4>'));
-                myModal.body
-                  .append($('<input type="text" autocomplete="on" id="http_event_code" name="http_event_code" required>'));
-
-                myModal.body
-                  .append($('<h4>HTTP Destination</h4>'));
-                myModal.body
-                  .append($('<input type="text" id="http_destination" autocomplete="on" name="http_destination" value="https://yoursplunkserver.com:8088/services/collector" required>'));
-
-                myModal.body
-                  .append($('<h4>Description</h4>'));
-                myModal.body
-                  .append($('<input type="text" id="http_description" name="http_description" value="This graph shows ...." required>'));
-
-
-                myModal.footer.append($('<button>').attr({
-                  type: 'button',
-                  'data-dismiss': 'modal'
-                }).addClass('btn btn-primary').text('Submit').on('click', function (modalEle) {
-                  // Post to HEC
-                  var description = document.getElementById("http_description").value;
-                  var http_event_code = document.getElementById("http_event_code").value;
-                  var http_destination = document.getElementById("http_destination").value;
-                  httpRequest(http_destination, http_event_code, cy.json(), description);
-
-                }))
-                myModal.show(); // Launch it!
-
+                openSaveStateDialog();
                 break;
 
               case "Remove Nodes by Count":
@@ -1621,7 +1632,7 @@ export default function createLinkAnalysis(SplunkVisualizationBase, SplunkVisual
           function deleteElement(elementId) {
             // Delete the search box
             var element = document.getElementById(elementId);
-            element.remove(element);
+            if (element) element.remove();
           }
 
           function makeid() {
@@ -1634,24 +1645,95 @@ export default function createLinkAnalysis(SplunkVisualizationBase, SplunkVisual
             return result;
           }
 
-          function displayMessage(time, message) {
-            let popper2 = cy.popper({
-              content: () => {
-                // Create an input box
-                var x = document.createElement("p");
-                x.setAttribute("name", "message_box");
-                x.textContent("test");
-                document.body.appendChild(x);
-                return x;
-              },
-              renderedPosition: () => ({
-                x: 10,
-                y: 10
-              }),
-              popper: {
+          // ---- Save State ---------------------------------------------------
+          // KV store (default where available): saved with the viewer's own Splunk
+          // session to the app's cyto_graphs collection; no token or CORS needed.
+          // HTTP Event Collector (optional): sent to index=cyto, sourcetype=cyto:graph.
 
-              } // my popper options here
+          function showStatus(title, text) {
+            var statusModal = new Modal("modal1", {
+              title: title,
+              backdrop: 'static',
+              keyboard: false,
+              destroyOnHide: true,
+              type: 'normal'
             });
+            statusModal.body.append($('<p>').text(text));
+            statusModal.footer.append($('<button>').attr({
+              type: 'button',
+              'data-dismiss': 'modal'
+            }).addClass('btn btn-primary').text('Close'));
+            statusModal.show();
+          }
+
+          function openSaveStateDialog() {
+            var useKv = !!(features.kvstore && features.saveToKvStore);
+            var saveModal = new Modal("modal1", {
+              title: "Save State",
+              backdrop: 'static',
+              keyboard: false,
+              destroyOnHide: true,
+              type: 'normal'
+            });
+            saveModal.body.append($('<p>').text('Save the current graph (layout, highlighting and styling) so it can be reopened in the Link Analysis Historical View.'));
+            saveModal.body.append($('<h4>').text('Description'));
+            saveModal.body.append($('<input type="text" id="http_description" name="http_description" required>').val('This graph shows ....'));
+
+            var hecFields = $('<div class="lla-hec-fields">');
+            hecFields.append($('<h4>').text('HTTP Event Collector token'));
+            hecFields.append($('<input type="password" autocomplete="off" id="http_event_code" name="http_event_code">'));
+            hecFields.append($('<h4>').text('HTTP Event Collector URL'));
+            hecFields.append($('<input type="text" id="http_destination" name="http_destination">').val('https://yoursplunkserver.com:8088/services/collector'));
+
+            if (useKv) {
+              saveModal.body.append($('<h4>').text('Save to'));
+              var method = $('<select id="lla_save_method" name="lla_save_method">')
+                .append($('<option value="kvstore">').text('Splunk (app KV store) - recommended'))
+                .append($('<option value="hec">').text('HTTP Event Collector (index=cyto)'));
+              saveModal.body.append(method);
+              hecFields.hide();
+              method.on('change', function () {
+                hecFields.toggle(method.val() === 'hec');
+              });
+            } else {
+              saveModal.body.append($('<p class="lla-note">').text('Saved via the HTTP Event Collector to index=cyto. The collector must allow cross-origin requests from this dashboard.'));
+            }
+            saveModal.body.append(hecFields);
+
+            saveModal.footer.append($('<button>').attr({
+              type: 'button',
+              'data-dismiss': 'modal'
+            }).addClass('btn btn-primary').text('Save').on('click', function () {
+              var description = document.getElementById("http_description").value;
+              var methodEl = document.getElementById("lla_save_method");
+              if (useKv && (!methodEl || methodEl.value === 'kvstore')) {
+                saveToKvStore(description);
+              } else {
+                var http_event_code = document.getElementById("http_event_code").value;
+                var http_destination = document.getElementById("http_destination").value;
+                httpRequest(http_destination, http_event_code, cy.json(), description);
+              }
+            }));
+            saveModal.show();
+          }
+
+          function saveToKvStore(description) {
+            var record = {
+              graph_id: makeid(),
+              description: description,
+              graph_info: JSON.stringify(cy.json()),
+              saved_at: Math.floor(Date.now() / 1000)
+            };
+            Promise.resolve()
+              .then(function () { return features.saveToKvStore(record); })
+              .then(function () {
+                showStatus("Save State Status", "Saved to Splunk as \"" + description + "\" (" + record.graph_id + ").");
+              })
+              .catch(function (err) {
+                // eslint-disable-next-line no-console
+                console.error(err);
+                showStatus("Error Occured in Saving State", "Could not save to the KV store: " + (err && err.message ? err.message : err));
+              });
           }
 
           function httpRequest(url, hec_code, message, description) {
@@ -1670,65 +1752,21 @@ export default function createLinkAnalysis(SplunkVisualizationBase, SplunkVisual
             xhttp.setRequestHeader("Authorization", full_hec);
             xhttp.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
             xhttp.onload = function () {
-              // If a non hard error occurs or success
-              responseText = JSON.parse(xhttp.responseText)
-              // Now we initialize the Modal itself
-              var myModal = new Modal("modal1", {
-                title: "Save State Status",
-                backdrop: 'static',
-                keyboard: false,
-                destroyOnHide: true,
-                type: 'normal'
-              });
-              /*
-              $(myModal.$el).on("hide", function() {
-              })*/
-              myModal.body
-                .append($('<p><b>Response</b> : ' + responseText.text + ' </p>'));
-
-              myModal.footer.append($('<button>').attr({
-                type: 'button',
-                'data-dismiss': 'modal'
-              }).addClass('btn btn-primary').text('Close').on('click', function () {
-                // Do Nothing Function
-
-              }))
-              myModal.show(); // Launch it!
-
+              var text;
+              try {
+                responseText = JSON.parse(xhttp.responseText);
+                text = responseText.text;
+              } catch (e) {
+                text = 'HTTP ' + xhttp.status;
+              }
+              showStatus("Save State Status", "Response : " + text);
             };
             xhttp.onerror = function () {
-              // If a hard error occurs
-              // Now we initialize the Modal itself
-              var myModal = new Modal("modal1", {
-                title: "Error Occured in Saving State",
-                backdrop: 'static',
-                keyboard: false,
-                destroyOnHide: true,
-                type: 'normal'
-              });
-              /*
-              $(myModal.$el).on("hide", function() {
-              })*/
-              myModal.body
-                .append($('<p>Error occured.  Check the Javascript console for the details.</p>'));
-
-              myModal.footer.append($('<button>').attr({
-                type: 'button',
-                'data-dismiss': 'modal'
-              }).addClass('btn btn-primary').text('Close').on('click', function () {
-                // Do Nothing Function
-
-              }))
-              myModal.show(); // Launch it!
-
-            }
+              showStatus("Error Occured in Saving State", "Error occured. Check the Javascript console for the details.");
+            };
             xhttp.send(JSON.stringify(full_message));
-
           }
 
-          function toggleModal() {
-            
-          }
           function getRandomArbitrary(min, max) {
             return Math.ceil(Math.random() * (max - min) + min);
           }
@@ -1737,16 +1775,29 @@ export default function createLinkAnalysis(SplunkVisualizationBase, SplunkVisual
 
         // Search data params
         getInitialDataParams: function () {
+          // Fetch up to the largest allowed limit; the maxRows option decides how many are drawn.
           return ({
             outputMode: SplunkVisualizationBase.ROW_MAJOR_OUTPUT_MODE,
-            count: 10000
+            count: MAX_ROWS_LIMIT
           });
         },
 
-        drilldownToCategory: function (categoryName, categoryFieldValue, browserEvent) {
-          var data = {};
-          data[categoryName] = categoryFieldValue;
+        _renderRowLimitWarning: function (shownRows) {
+          var existing = this.el.querySelector('.lla-row-warning');
+          if (this.totalRows > shownRows) {
+            if (!existing) {
+              existing = document.createElement('div');
+              existing.className = 'lla-row-warning';
+              this.el.appendChild(existing);
+            }
+            existing.textContent = 'Showing the first ' + shownRows + ' of ' + this.totalRows +
+              ' rows. Raise "Maximum rows" in the visualization options to draw more.';
+          } else if (existing) {
+            existing.remove();
+          }
+        },
 
+        drilldownTo: function (data, browserEvent) {
           this.drilldown({
             action: SplunkVisualizationBase.FIELD_VALUE_DRILLDOWN,
             data: data
@@ -1755,6 +1806,42 @@ export default function createLinkAnalysis(SplunkVisualizationBase, SplunkVisual
 
 
         // Override to respond to re-sizing events
-        reflow: function () {}
+        reflow: function () {
+          if (this._cy) this._cy.resize();
+        }
       });
+}
+
+// Rows: default drawn, and hard upper limit fetched/drawn.
+var DEFAULT_MAX_ROWS = 10000;
+var MAX_ROWS_LIMIT = 50000;
+
+function parseMaxRows(value) {
+  var n = parseInt(value, 10);
+  if (!isFinite(n) || n <= 0) return DEFAULT_MAX_ROWS;
+  return Math.min(n, MAX_ROWS_LIMIT);
+}
+
+function isDarkColor(color) {
+  var m = /^#?([0-9a-f]{6}|[0-9a-f]{3})$/i.exec(String(color).trim());
+  if (!m) return false;
+  var hex = m[1].length === 3 ? m[1].split('').map(function (c) { return c + c; }).join('') : m[1];
+  var r = parseInt(hex.slice(0, 2), 16), g = parseInt(hex.slice(2, 4), 16), b = parseInt(hex.slice(4, 6), 16);
+  return (0.299 * r + 0.587 * g + 0.114 * b) < 140;
+}
+
+/**
+ * Returns a visualization class whose every instance gets its own private
+ * closure (state, element ids), so several link analysis panels can share a page.
+ */
+export default function createLinkAnalysisClass(SplunkVisualizationBase, SplunkVisualizationUtils, features) {
+  function LinkAnalysisVisualization() {
+    var Impl = createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, features);
+    var instance = Object.create(Impl.prototype);
+    var result = Impl.apply(instance, arguments);
+    return (result && typeof result === 'object') ? result : instance;
+  }
+  // Expose a prototype so callers that inspect it still find the base API.
+  LinkAnalysisVisualization.prototype = createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, features).prototype;
+  return LinkAnalysisVisualization;
 }

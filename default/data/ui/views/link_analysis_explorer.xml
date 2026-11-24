@@ -47,7 +47,8 @@
                 "layoutStyle": "fcose",
                 "pathAlgo": "dijkstra",
                 "directed": false,
-                "recursiveLookup": true
+                "recursiveLookup": true,
+                    "maxRows": 10000
             }
         }
     },

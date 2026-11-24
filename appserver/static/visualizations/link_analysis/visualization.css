@@ -1,14 +1,10 @@
-/*
- * CSS rules for visualization.
- * Class namespacing is good practice.
- */
-
- #cy {
-  width: 100%;
-  height: 100%;
-  position: absolute;
-  top: 0px;
-  left: 0px;
-  z-index: 999;
-  active-bg-opacity: 0.333;
+/* Styles for the classic visualization are bundled into visualization.js
+   (see frontend/src/core/core.css). This file is loaded by Splunk Web for
+   legacy custom visualizations and only sizes the container. */
+.lla-cy {
+    width: 100%;
+    height: 100%;
+    position: absolute;
+    top: 0;
+    left: 0;
 }

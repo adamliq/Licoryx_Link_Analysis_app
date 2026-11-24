@@ -3,4 +3,6 @@
 .gitignore export-ignore
 package.sh export-ignore
 dist/ export-ignore
-studio/ export-ignore
+frontend/ export-ignore
+tests/ export-ignore
+.github/ export-ignore

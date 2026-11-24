@@ -1,0 +1,128 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build, package and AppInspect
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build visualizations
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Committed bundles match the source
+        run: git diff --exit-code --stat -- appserver/static/visualizations
+
+      - name: Package app
+        run: ./package.sh
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: AppInspect (Splunk Cloud checks)
+        run: |
+          pip install --quiet splunk-appinspect
+          PKG=$(ls dist/licoryx_link_analysis_app-*.tgz | sort -V | tail -1)
+          splunk-appinspect inspect "$PKG" --mode precert --included-tags cloud \
+            --output-file appinspect.json --data-format json
+          python3 - <<'PY'
+          import json, sys
+          d = json.load(open('appinspect.json'))
+          s = d['summary']
+          print({k: s.get(k) for k in ('error', 'failure', 'future_failure', 'warning', 'success')})
+          for r in d['reports']:
+              for g in r['groups']:
+                  for c in g['checks']:
+                      if c['result'] in ('error', 'failure', 'warning', 'future_failure'):
+                          print(c['result'].upper(), c['name'])
+          sys.exit(1 if s.get('error') or s.get('failure') else 0)
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-package
+          path: |
+            dist/licoryx_link_analysis_app-*.tgz
+            appinspect.json
+
+  smoke:
+    name: Smoke test on Splunk ${{ matrix.splunk }}
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - splunk: "10.4"
+            skip_studio: "0"
+          - splunk: "9.4"
+            skip_studio: "1"
+    env:
+      SPLUNK_PASSWORD: ci-Passw0rd-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: app-package
+          path: artifact
+
+      - name: Start Splunk ${{ matrix.splunk }} with the app
+        run: |
+          PKG=$(ls artifact/dist/licoryx_link_analysis_app-*.tgz | sort -V | tail -1)
+          cp "$PKG" /tmp/app.tgz
+          docker run -d --name splunk -p 8000:8000 -p 8089:8089 \
+            -e SPLUNK_GENERAL_TERMS=--accept-sgt-current-at-splunk-com \
+            -e SPLUNK_START_ARGS=--accept-license \
+            -e SPLUNK_PASSWORD="$SPLUNK_PASSWORD" \
+            -e SPLUNK_APPS_URL=/tmp/app.tgz \
+            -v /tmp/app.tgz:/tmp/app.tgz \
+            splunk/splunk:${{ matrix.splunk }}
+          for i in $(seq 1 90); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' splunk)
+            echo "health: $status"
+            [ "$status" = healthy ] && exit 0
+            sleep 10
+          done
+          docker logs splunk | tail -50
+          exit 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Playwright
+        working-directory: tests
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
+      - name: Run smoke tests
+        working-directory: tests
+        env:
+          SKIP_STUDIO: ${{ matrix.skip_studio }}
+        run: node smoke.mjs screenshots
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-screenshots-${{ matrix.splunk }}
+          path: tests/screenshots
