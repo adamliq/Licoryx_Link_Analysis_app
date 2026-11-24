@@ -42,6 +42,14 @@
       "maxRows": {
         "type": "number",
         "default": 10000
+      },
+      "nodeSize": {
+        "type": "string",
+        "default": "fixed"
+      },
+      "largeGraphNodes": {
+        "type": "number",
+        "default": 2000
       }
     },
     "editorConfig": [
@@ -141,6 +149,36 @@
               "label": "Maximum rows (1-50000)",
               "editor": "editor.number",
               "option": "maxRows"
+            }
+          ],
+          [
+            {
+              "label": "Node size",
+              "editor": "editor.select",
+              "option": "nodeSize",
+              "editorProps": {
+                "values": [
+                  {
+                    "label": "Fixed",
+                    "value": "fixed"
+                  },
+                  {
+                    "label": "By number of connections",
+                    "value": "degree"
+                  },
+                  {
+                    "label": "By total count",
+                    "value": "count"
+                  }
+                ]
+              }
+            }
+          ],
+          [
+            {
+              "label": "Large graph threshold (nodes; slow layouts switch to grid above this)",
+              "editor": "editor.number",
+              "option": "largeGraphNodes"
             }
           ]
         ]

@@ -9,18 +9,89 @@
     left: 0;
 }
 
-.lla-row-warning {
+.lla-notices {
     position: absolute;
     left: 8px;
     bottom: 8px;
     z-index: 5;
     max-width: calc(100% - 16px);
+    display: none;
+    pointer-events: none;
+    font: 12px 'Splunk Platform Sans', 'Proxima Nova', Roboto, Helvetica, Arial, sans-serif;
+}
+
+.lla-notice {
+    margin-top: 4px;
     padding: 4px 8px;
     border-radius: 3px;
     background: rgba(248, 190, 52, 0.92);
     color: #000;
+}
+
+.lla-legend {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 5;
+    max-height: calc(100% - 16px);
+    overflow-y: auto;
+    padding: 6px 10px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.9);
+    color: #2b3033;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+    font: 12px 'Splunk Platform Sans', 'Proxima Nova', Roboto, Helvetica, Arial, sans-serif;
+}
+
+.lla-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    line-height: 20px;
+    white-space: nowrap;
+}
+
+.lla-legend-swatch {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+}
+
+.lla-busy {
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 6;
+    display: none;
+    padding: 4px 12px;
+    border-radius: 12px;
+    background: rgba(32, 34, 40, 0.85);
+    color: #fff;
     font: 12px 'Splunk Platform Sans', 'Proxima Nova', Roboto, Helvetica, Arial, sans-serif;
     pointer-events: none;
+}
+
+.lla-reset {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    z-index: 7;
+    padding: 4px 14px;
+    border: 1px solid #1a9035;
+    border-radius: 3px;
+    background: #1a9035;
+    color: #fff;
+    cursor: pointer;
+    font: 13px 'Splunk Platform Sans', 'Proxima Nova', Roboto, Helvetica, Arial, sans-serif;
+}
+
+.lla-modal-body textarea.lla-export {
+    width: 100%;
+    box-sizing: border-box;
+    font: 11px monospace;
+    resize: vertical;
 }
 
 .lla-note {

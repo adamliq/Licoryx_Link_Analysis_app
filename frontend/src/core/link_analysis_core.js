@@ -9,11 +9,13 @@ import $ from 'jquery';
 import cytoscape from 'cytoscape';
 import cxtmenu from 'cytoscape-cxtmenu';
 import fcose from 'cytoscape-fcose';
-import popper from 'cytoscape-popper';
 import dagre from 'cytoscape-dagre';
 import klay from 'cytoscape-klay';
-import * as d3 from 'd3';
 import Modal from './Modal.js';
+import {
+  DEFAULT_LARGE_GRAPH_NODES, MAX_ROWS_LIMIT, countByKey, detectColumns, drilldownData, isDarkColor,
+  matchNodeName, menuColors, nodeAttributes, nodeSizes, ordinalColor, parseMaxRows, parsePositiveInt, planLayout,
+} from './util.js';
 import coseBilkent from 'cytoscape-cose-bilkent';
 import dblclick from 'cytoscape-dblclick';
 
@@ -21,7 +23,6 @@ import dblclick from 'cytoscape-dblclick';
 cxtmenu(cytoscape);
 fcose(cytoscape);
 dagre(cytoscape);
-popper(cytoscape);
 klay(cytoscape);
 coseBilkent(cytoscape);
 dblclick(cytoscape);
@@ -178,6 +179,14 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
                 this.maxRows = parseMaxRows(this._getEscapedProperty('maxRows', config));
                 break;
 
+              case "display.visualizations.custom.licoryx_link_analysis_app.link_analysis.nodeSize":
+                this.nodeSize = this._getEscapedProperty('nodeSize', config) || 'fixed';
+                break;
+
+              case "display.visualizations.custom.licoryx_link_analysis_app.link_analysis.largeGraphNodes":
+                this.largeGraphNodes = parsePositiveInt(this._getEscapedProperty('largeGraphNodes', config), DEFAULT_LARGE_GRAPH_NODES);
+                break;
+
               default:
                 // Set default options for the console if this is a fresh load or something else happened.
                 this.layoutStyle = this._getEscapedProperty('layoutStyle', config) || 'fcose';
@@ -190,6 +199,8 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
                 });
                 recursiveLookup = this.recursiveLookup;
                 this.maxRows = parseMaxRows(this._getEscapedProperty('maxRows', config));
+                this.nodeSize = this._getEscapedProperty('nodeSize', config) || 'fixed';
+                this.largeGraphNodes = parsePositiveInt(this._getEscapedProperty('largeGraphNodes', config), DEFAULT_LARGE_GRAPH_NODES);
 
 
                 break;
@@ -207,6 +218,8 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
             });
             recursiveLookup = this.recursiveLookup;
             this.maxRows = parseMaxRows(this._getEscapedProperty('maxRows', config));
+            this.nodeSize = this._getEscapedProperty('nodeSize', config) || 'fixed';
+            this.largeGraphNodes = parsePositiveInt(this._getEscapedProperty('largeGraphNodes', config), DEFAULT_LARGE_GRAPH_NODES);
 
 
             return;
@@ -280,6 +293,10 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
           this.srcField = data.fields[0] && data.fields[0].name;
           this.destField = data.fields[1] && data.fields[1].name;
           this.srcNames = new Set(data.rows.map(function (r) { return r[0]; }));
+          // Optional columns (count, src_group/dest_group, src_color/dest_color) and per-node attributes.
+          var columns = detectColumns(data.fields);
+          this.columns = columns;
+          this.nodeAttrs = nodeAttributes(data.rows, columns);
 
           // Update group items
           // For each field in the output if the regex matches the pattern variable push it to the columns array
@@ -339,7 +356,7 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
             object = {};
             object.target = nodeByName(link[0], group_id);
             object.source = nodeByName(link[1], group_id);
-            object.count = link[2];
+            object.count = columns.count >= 0 ? link[columns.count] : undefined;
             // Push the nodes to the nodesByName array including a group id of 0.
             // Push the object dictionary item from lines above to the linksArray array
             linksArray.push(object);
@@ -347,18 +364,7 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
           // For performance reasons if there is more than 1000 edges don't apply dynamic colours.
           if (datum.length < 1000) {
             // Perform a group by count by each source address
-            this.groupCount = d3.nest()
-              .key(function (d) {
-                return d.name;
-              })
-              .rollup(function (v) {
-
-                return v.length;
-              })
-              .entries(group_list)
-              .sort(function (a, b) {
-                return d3.descending(a.value, b.value);
-              });
+            this.groupCount = countByKey(group_list, 'name');
 
           }
           this.format_info = format_info;
@@ -405,7 +411,8 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
 
           // Get configuration
           this._getConfigParams(config);
-          this._renderRowLimitWarning(data.rows.length);
+          var vizEl = this.el;
+          this._notices = [];
 
           // Take the first data point
           datum = data.rows;
@@ -436,7 +443,8 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
           var pattern = /node\d{2}$/i;
 
           // Create a color gradient for highlighting groups
-          var color = d3.scaleOrdinal(d3.schemeCategory20);
+          var color = ordinalColor();
+          var groupColor = ordinalColor();
 
           // Nodes Array
           nodesArray = this.nodesArray;
@@ -462,13 +470,10 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
           if (getCy == null) {
             // Specify a width and height that matches the Splunk console
             // Append an SVG Element
-            var svg = d3.select(this.el)
-              .append("div")
-              .attr('width', width)
-              .attr('height', height)
-              .attr('id', CY_ID)
-              .attr('class', 'lla-cy')
-              .attr('active-bg-color', '#555');
+            var cyDiv = document.createElement('div');
+            cyDiv.id = CY_ID;
+            cyDiv.className = 'lla-cy';
+            this.el.appendChild(cyDiv);
           }
 
           // Add Cytoscape Element
@@ -534,23 +539,36 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
           // Create an incrementer variable for node id
           var n = 0;
 
-          // Foreach unique node add to the node list
+          // Node colours: explicit src_color/dest_color, else src_group/dest_group (with a legend),
+          // else the automatic connectivity groups. Optional size by degree or by summed count.
+          var nodeAttrs = this.nodeAttrs || new Map();
+          var sizes = nodeSizes(nodeAttrs, this.nodeSize);
+          var legend = new Map();
           nodesUnique.forEach(function (node) {
             // Create an incrementer for the node id
             node_id = "n" + n;
             // Add node and node ID
             nodeById(node, node_id)
-            node_color = color(nodesByName[node].group);
-            cy.add({
-              data: {
-                id: node_id,
-                weight: 1,
-                label: node,
-                color: node_color
-              }
-            });
+            var attrs = nodeAttrs.get(node) || {};
+            if (attrs.color) {
+              node_color = attrs.color;
+            } else if (attrs.group !== null && attrs.group !== undefined) {
+              node_color = groupColor(attrs.group);
+              legend.set(attrs.group, node_color);
+            } else {
+              node_color = color(nodesByName[node].group);
+            }
+            var nodeData = {
+              id: node_id,
+              weight: 1,
+              label: node,
+              color: node_color
+            };
+            if (sizes && sizes.has(node)) nodeData.size = sizes.get(node);
+            cy.add({ data: nodeData });
             n++;
           });
+          this._renderLegend(legend);
 
           datum.forEach(function (link) {
             // Add nodes to list
@@ -621,8 +639,12 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
 
 
           }
+          // Layout and label decisions for large graphs.
+          var plan = planLayout(this.layoutStyle, nodesUnique.length, datum.length, this.largeGraphNodes);
+          layoutStyle_global = plan.layout;
+          this._notices = plan.notices;
           // If there is a line_label field in the Splunk search define it as a data field
-          if (this.format_info.line_label) {
+          if (this.format_info.line_label && plan.showEdgeLabels) {
             cy.style()
               .selector('edge')
               .style({
@@ -647,6 +669,14 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
               'background-color': 'data(color)',
               'min-zoomed-font-size': '15',
             })
+          if (sizes) {
+            cy.style()
+              .selector('node[size]')
+              .style({
+                'width': 'data(size)',
+                'height': 'data(size)'
+              })
+          }
 
           // Node Highlighting class
           cy.style()
@@ -682,8 +712,16 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
 
           // End Styling
 
-          // Run the layout
-          runLayout(this.layoutStyle)
+          // "Laying out..." indicator: shown now, hidden in launchPostProcess() when the layout
+          // stops. The layout starts on the next tick so the browser can paint the indicator.
+          var self = this;
+          var busyEl = this._busyElement();
+          busyEl.style.display = 'block';
+          setTimeout(function () {
+            if (self._cy !== cy) return; // a newer render replaced this graph
+            runLayout(plan.layout);
+          }, 30);
+          this._renderNotices(data.rows.length, this._notices);
 
           // Run Layout function
           function runLayout(layoutStyle, initialRun = true) {
@@ -863,7 +901,7 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
 
               case "cose":
                 cy.layout(layoutCoseOptions).run();
-
+                break;
 
               default:
                 cy.layout({
@@ -890,6 +928,18 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
           }
 
           function launchPostProcess() {
+            busyEl.style.display = 'none';
+            // Layout stop callbacks call cy.removeAllListeners(), so (re)register the
+            // double-click drilldown after every layout (initial render, Refresh, ...).
+            cy.dblclick(300);
+            cy.on('dblclick', function (e) {
+              var target = e.target;
+              if (!target || target === cy || typeof target.isNode !== 'function') return;
+              var data = drilldownData(self, target.isNode()
+                ? { kind: 'node', label: target.data('label') }
+                : { kind: 'edge', source: target.source().data('label'), target: target.target().data('label') });
+              self.drilldownTo(data, e.originalEvent);
+            });
             let boxedNodes = cy.collection();
             let elemsWChildren = cy.collection();
             if (preRemove) {
@@ -931,7 +981,7 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
 
             var menuDataList = document.createElement("datalist");
             menuDataList.setAttribute("id", MENU_LIST_ID);
-            menu_list_items = ['Delete Highlighted Items', 'Delete Non-Highlighted Items', 'Refresh', 'Clear Formatting', 'Save State', 'Style Edges'];
+            menu_list_items = ['Delete Highlighted Items', 'Delete Non-Highlighted Items', 'Refresh', 'Clear Formatting', 'Save State', 'Style Edges', 'Export Graph JSON'];
             menu_list_items = menu_list_items.sort()
             menu_list_items.forEach(function (item) {
               var option = document.createElement('option');
@@ -948,7 +998,8 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
             });
 
             // Begin - Add Menu for nodes and background
-            cy.cxtmenu({
+            var cxtColors = menuColors(!!bgColor && isDarkColor(bgColor));
+            cy.cxtmenu(Object.assign({}, cxtColors, {
               selector: 'node',
               commands: [{
                   content: "Single Path Select",
@@ -1047,45 +1098,30 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
 
                     });
 
-                    // Create a popper menu to allow resetting the layout
-                    let popper2 = cy.popper({
-                      content: () => {
-                        // Create an input box
-                        var x = document.createElement("button");
-                        x.setAttribute("name", "reset_view");
-                        x.setAttribute("id", RESET_VIEW_ID);
-                        x.setAttribute("class", "btn  btn-primary")
-                        x.innerHTML = "Reset";
-                        x.setAttribute("style", "z-index:9999");
-                        x.addEventListener("click", function (e) {
-                          // Add the saved graph as the current json
-                          cy.json(graphStateForFocus)
-                          var layoutStatic = cy.layout({
-                            name: 'preset',
-                            animation: true,
-                            animationEasing: 'linear',
-                            animationDuration: 1000
-
-                          });
-                          // Prevent mouse over highlight from occuring
-                          isZoomedIn = undefined;
-                          layoutStatic.run();
-                          // Delete the button after using
-                          var element = document.getElementById(RESET_VIEW_ID);
-                          element.parentNode.removeChild(element);
-                        }, false);;
-                        document.body.appendChild(x);
-
-                        return x;
-                      },
-                      renderedPosition: () => ({
-                        x: 10,
-                        y: 10
-                      }),
-                      popper: {
-
-                      } // my popper options here
-                    });
+                    // Reset button (top-left of the visualization) to undo the focus
+                    var existingReset = document.getElementById(RESET_VIEW_ID);
+                    if (existingReset) existingReset.remove();
+                    var resetButton = document.createElement("button");
+                    resetButton.setAttribute("name", "reset_view");
+                    resetButton.setAttribute("id", RESET_VIEW_ID);
+                    resetButton.setAttribute("type", "button");
+                    resetButton.className = "lla-reset btn btn-primary";
+                    resetButton.textContent = "Reset";
+                    resetButton.addEventListener("click", function () {
+                      // Add the saved graph as the current json
+                      cy.json(graphStateForFocus)
+                      var layoutStatic = cy.layout({
+                        name: 'preset',
+                        animation: true,
+                        animationEasing: 'linear',
+                        animationDuration: 1000
+                      });
+                      // Prevent mouse over highlight from occuring
+                      isZoomedIn = undefined;
+                      layoutStatic.run();
+                      resetButton.remove();
+                    }, false);
+                    vizEl.appendChild(resetButton);
 
                   },
                 },
@@ -1165,9 +1201,9 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
                 },
 
               ]
-            });
+            }));
 
-            cy.cxtmenu({
+            cy.cxtmenu(Object.assign({}, cxtColors, {
               selector: 'core',
               commands: [{
                   content: 'Search Nodes',
@@ -1241,7 +1277,7 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
                 },
 
               ]
-            });
+            }));
 
             // Set Min Zoom / Max Zoom
             cy.minZoom(0.05);
@@ -1293,29 +1329,6 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
 
           }
 
-          // Specify interval (in milliseconds)
-          const interval = 300;
-          cy.dblclick(interval);
-
-          // Double-click drilldown: report the clicked node (by its source/target
-          // field name) or edge (both field names) so dashboards can use
-          // $click.name$ / $click.value$ (classic) or the Studio drilldown payload.
-          cy.on('dblclick', function (e) {
-            var target = e.target;
-            if (!target || target === cy || typeof target.isNode !== 'function') return;
-            var srcField = this.srcField || 'source';
-            var destField = this.destField || 'target';
-            var data = {};
-            if (target.isNode()) {
-              var label = target.data('label');
-              var field = this.srcNames && this.srcNames.has(label) ? srcField : destField;
-              data[field] = label;
-            } else {
-              data[srcField] = target.source().data('label');
-              data[destField] = target.target().data('label');
-            }
-            this.drilldownTo(data, e.originalEvent);
-          }.bind(this));
 
           // End - Add Menu for nodes and background
 
@@ -1323,15 +1336,8 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
           function searchNodes() {
             var input = document.getElementById("node_search");
             var node_value = input ? String(input.value).trim() : '';
-            var match = nodesByName[node_value];
-            if (!match && node_value) {
-              // Fall back to a case-insensitive exact match, then a substring match.
-              var lower = node_value.toLowerCase();
-              var names = Object.keys(nodesByName);
-              var found = names.find(function (n) { return String(n).toLowerCase() === lower; }) ||
-                names.find(function (n) { return String(n).toLowerCase().indexOf(lower) !== -1; });
-              if (found) match = nodesByName[found];
-            }
+            var found = matchNodeName(Object.keys(nodesByName), node_value);
+            var match = found !== null ? nodesByName[found] : null;
             if (match && cy.getElementById(String(match.id)).length) {
               node_id = "#" + match.id;
               // Zoom in to the node naturally
@@ -1505,6 +1511,11 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
               case "Save State":
                 deleteElement('menu_select')
                 openSaveStateDialog();
+                break;
+
+              case "Export Graph JSON":
+                deleteElement('menu_select')
+                openExportDialog();
                 break;
 
               case "Remove Nodes by Count":
@@ -1691,10 +1702,25 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
                 .append($('<option value="kvstore">').text('Splunk (app KV store) - recommended'))
                 .append($('<option value="hec">').text('HTTP Event Collector (index=cyto)'));
               saveModal.body.append(method);
+              var kvNote = $('<p class="lla-note lla-kv-note">').hide();
+              saveModal.body.append(kvNote);
               hecFields.hide();
               method.on('change', function () {
                 hecFields.toggle(method.val() === 'hec');
               });
+              // If the KV store is not running (e.g. Splunk 10.4 on Linux kernel 6.19+), switch to HEC up front.
+              if (features.checkKvStore) {
+                Promise.resolve(features.checkKvStore()).then(function (status) {
+                  if (status && status.ready === false) {
+                    method.find('option[value="kvstore"]').prop('disabled', true)
+                      .text('Splunk (app KV store) - unavailable');
+                    method.val('hec');
+                    hecFields.show();
+                    kvNote.text('The KV store is not available on this Splunk server (' + (status.status || 'unknown') +
+                      '), so the graph will be sent to the HTTP Event Collector instead.').show();
+                  }
+                }).catch(function () { /* status unknown: keep the KV store default */ });
+              }
             } else {
               saveModal.body.append($('<p class="lla-note">').text('Saved via the HTTP Event Collector to index=cyto. The collector must allow cross-origin requests from this dashboard.'));
             }
@@ -1724,8 +1750,12 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
               graph_info: JSON.stringify(cy.json()),
               saved_at: Math.floor(Date.now() / 1000)
             };
-            Promise.resolve()
-              .then(function () { return features.saveToKvStore(record); })
+            Promise.resolve(features.currentUser ? features.currentUser() : null)
+              .catch(function () { return null; })
+              .then(function (user) {
+                if (user) record.saved_by = user;
+                return features.saveToKvStore(record);
+              })
               .then(function () {
                 showStatus("Save State Status", "Saved to Splunk as \"" + description + "\" (" + record.graph_id + ").");
               })
@@ -1734,6 +1764,28 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
                 console.error(err);
                 showStatus("Error Occured in Saving State", "Could not save to the KV store: " + (err && err.message ? err.message : err));
               });
+          }
+
+          // Show the graph as Cytoscape JSON so it can be copied (e.g. from Dashboard Studio,
+          // which cannot save with the viewer's login) and imported on the Manage Saved Graphs page.
+          function openExportDialog() {
+            var exportModal = new Modal("modal1", {
+              title: "Export Graph JSON",
+              backdrop: 'static',
+              keyboard: false,
+              destroyOnHide: true,
+              type: 'normal'
+            });
+            exportModal.body.append($('<p>').text('Copy this JSON (Ctrl/Cmd+A, Ctrl/Cmd+C) and paste it into "Import graph" on the Manage Saved Graphs page to save it in Splunk.'));
+            var area = $('<textarea class="lla-export" id="lla_export_json" readonly rows="12">').val(JSON.stringify(cy.json()));
+            area.on('focus click', function () { this.select(); });
+            exportModal.body.append(area);
+            exportModal.footer.append($('<button>').attr({
+              type: 'button',
+              'data-dismiss': 'modal'
+            }).addClass('btn btn-primary').text('Close'));
+            exportModal.show();
+            area.trigger('focus');
           }
 
           function httpRequest(url, hec_code, message, description) {
@@ -1782,19 +1834,63 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
           });
         },
 
-        _renderRowLimitWarning: function (shownRows) {
-          var existing = this.el.querySelector('.lla-row-warning');
-          if (this.totalRows > shownRows) {
-            if (!existing) {
-              existing = document.createElement('div');
-              existing.className = 'lla-row-warning';
-              this.el.appendChild(existing);
-            }
-            existing.textContent = 'Showing the first ' + shownRows + ' of ' + this.totalRows +
-              ' rows. Raise "Maximum rows" in the visualization options to draw more.';
-          } else if (existing) {
-            existing.remove();
+        _renderNotices: function (shownRows, extra) {
+          var box = this.el.querySelector('.lla-notices');
+          if (!box) {
+            box = document.createElement('div');
+            box.className = 'lla-notices';
+            this.el.appendChild(box);
           }
+          box.textContent = '';
+          if (this.totalRows > shownRows) {
+            var row = document.createElement('div');
+            row.className = 'lla-notice lla-row-warning';
+            row.textContent = 'Showing the first ' + shownRows + ' of ' + this.totalRows +
+              ' rows. Raise "Maximum rows" in the visualization options to draw more.';
+            box.appendChild(row);
+          }
+          (extra || []).forEach(function (text) {
+            var n = document.createElement('div');
+            n.className = 'lla-notice';
+            n.textContent = text;
+            box.appendChild(n);
+          });
+          box.style.display = box.childNodes.length ? 'block' : 'none';
+        },
+
+        _renderLegend: function (legend) {
+          var box = this.el.querySelector('.lla-legend');
+          if (!legend || legend.size === 0) {
+            if (box) box.remove();
+            return;
+          }
+          if (!box) {
+            box = document.createElement('div');
+            box.className = 'lla-legend';
+            this.el.appendChild(box);
+          }
+          box.textContent = '';
+          legend.forEach(function (color, group) {
+            var item = document.createElement('div');
+            item.className = 'lla-legend-item';
+            var swatch = document.createElement('span');
+            swatch.className = 'lla-legend-swatch';
+            swatch.style.background = color;
+            item.appendChild(swatch);
+            item.appendChild(document.createTextNode(String(group)));
+            box.appendChild(item);
+          });
+        },
+
+        _busyElement: function () {
+          var el = this.el.querySelector('.lla-busy');
+          if (!el) {
+            el = document.createElement('div');
+            el.className = 'lla-busy';
+            el.textContent = 'Laying out graph...';
+            this.el.appendChild(el);
+          }
+          return el;
         },
 
         drilldownTo: function (data, browserEvent) {
@@ -1810,24 +1906,6 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
           if (this._cy) this._cy.resize();
         }
       });
-}
-
-// Rows: default drawn, and hard upper limit fetched/drawn.
-var DEFAULT_MAX_ROWS = 10000;
-var MAX_ROWS_LIMIT = 50000;
-
-function parseMaxRows(value) {
-  var n = parseInt(value, 10);
-  if (!isFinite(n) || n <= 0) return DEFAULT_MAX_ROWS;
-  return Math.min(n, MAX_ROWS_LIMIT);
-}
-
-function isDarkColor(color) {
-  var m = /^#?([0-9a-f]{6}|[0-9a-f]{3})$/i.exec(String(color).trim());
-  if (!m) return false;
-  var hex = m[1].length === 3 ? m[1].split('').map(function (c) { return c + c; }).join('') : m[1];
-  var r = parseInt(hex.slice(0, 2), 16), g = parseInt(hex.slice(2, 4), 16), b = parseInt(hex.slice(4, 6), 16);
-  return (0.299 * r + 0.587 * g + 0.114 * b) < 140;
 }
 
 /**

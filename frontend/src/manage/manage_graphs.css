@@ -1,0 +1,15 @@
+#llm-root { font-size: 13px; }
+.llm-status { display: none; margin: 0 0 12px; padding: 8px 12px; border-radius: 3px; }
+.llm-info { background: #e6f0fa; color: #1a3d5c; }
+.llm-ok { background: #e3f4e6; color: #1b5e20; }
+.llm-error { background: #fde8e8; color: #8a1c1c; }
+.llm-toolbar { margin-bottom: 8px; }
+.llm-table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
+.llm-table th, .llm-table td { padding: 6px 10px; border-bottom: 1px solid rgba(128, 128, 128, 0.3); text-align: left; vertical-align: middle; }
+.llm-table th { font-weight: 600; }
+.llm-id { font-family: monospace; font-size: 12px; opacity: 0.8; }
+.llm-actions .btn { margin-right: 6px; }
+.llm-empty { opacity: 0.7; font-style: italic; }
+.llm-input { display: block; width: 100%; max-width: 900px; box-sizing: border-box; margin-bottom: 8px; }
+textarea.llm-input { font-family: monospace; font-size: 12px; }
+.llm-help { opacity: 0.8; max-width: 900px; }

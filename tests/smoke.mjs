@@ -288,6 +288,83 @@ async function openCxtCommand(page, frame, x, y, command) {
         check('no page errors on the search page', errors.length === 0, errors.join(' | '));
     }
 
+    // 1a. KV store down: Save State must switch to the HTTP Event Collector by itself.
+    if (SKIP_KVSTORE) {
+        let detail = '';
+        let ok = false;
+        try {
+            const cyBox = await page.locator('.lla-cy:has(canvas)').last().boundingBox();
+            await cxtCommand(page, page, cyBox.x + 30, cyBox.y + 30, 'Menu', '#menu_select');
+            await page.fill('#menu_select', 'Save State');
+            await page.click('.lla-modal-footer .btn-primary');
+            await page.waitForTimeout(3000);
+            const method = await page.locator('#lla_save_method').inputValue();
+            const note = (await page.locator('.lla-kv-note').innerText().catch(() => '')).trim();
+            ok = method === 'hec' && /not available/.test(note);
+            detail = `method=${method}; ${note}`;
+            await page.keyboard.press('Escape');
+            await page.locator('.lla-modal-close').click().catch(() => {});
+        } catch (e) {
+            detail = e.message;
+        }
+        check('Save State falls back to HEC when the KV store is down', ok, detail);
+    }
+
+    // 1c. Styling: src_group/dest_group legend, node size by count, large-graph layout fallback.
+    {
+        const GROUPS = '| makeresults count=12 | streamstats count as n | eval src_ip="host".(n%4), dest_ip="srv".(n%3), count=n, src_group="workstations", dest_group="servers" | table src_ip dest_ip count src_group dest_group';
+        const q = encodeURIComponent(GROUPS);
+        await page.goto(`${WEB}/en-US/app/${APP}/search?q=${q}&earliest=-15m&latest=now&display.page.search.tab=visualizations&display.general.type=visualizations&display.visualizations.type=custom&display.visualizations.custom.type=${CLASSIC}&display.visualizations.custom.${CLASSIC}.nodeSize=count`);
+        await page.waitForSelector('.lla-cy canvas', { timeout: 90000, state: 'attached' }).catch(() => {});
+        await page.waitForTimeout(4000);
+        const legend = (await page.locator('.lla-legend-item').allTextContents()).map((t) => t.trim()).sort();
+        await page.screenshot({ path: `${OUT}/classic-legend.png` });
+        check('src_group/dest_group colour nodes and show a legend', legend.join(',') === 'servers,workstations', legend.join(','));
+
+        const BIGGRAPH = '| makeresults count=400 | streamstats count as n | eval src_ip="a".n, dest_ip="b".(n%150), count=1 | table src_ip dest_ip count';
+        await page.goto(`${WEB}/en-US/app/${APP}/search?q=${encodeURIComponent(BIGGRAPH)}&earliest=-15m&latest=now&display.page.search.tab=visualizations&display.general.type=visualizations&display.visualizations.type=custom&display.visualizations.custom.type=${CLASSIC}&display.visualizations.custom.${CLASSIC}.largeGraphNodes=100`);
+        await page.waitForSelector('.lla-cy canvas', { timeout: 90000, state: 'attached' }).catch(() => {});
+        await page.waitForTimeout(4000);
+        const notices = (await page.locator('.lla-notice').allTextContents()).join(' ');
+        check('large graphs switch slow layouts to grid with a notice', /using the "grid" layout/.test(notices), notices);
+    }
+
+    // 1d. Manage Saved Graphs: list, rename, import (from Export Graph JSON format) and delete.
+    if (!SKIP_KVSTORE) {
+        let detail = '';
+        let ok = false;
+        try {
+            await page.goto(`${WEB}/en-US/app/${APP}/manage_saved_graphs`);
+            await page.waitForSelector('.llm-table tbody tr', { timeout: 60000 });
+            await dismissPopups(page);
+            const listed = await page.locator('.llm-table tbody tr', { hasText: 'smoke test graph' }).count();
+            // Import a small graph, then rename and delete it.
+            const graph = { elements: { nodes: [{ data: { id: 'n0', label: 'x' }, position: { x: 0, y: 0 } }], edges: [] } };
+            await page.fill('#llm-import-description', 'smoke import');
+            await page.fill('#llm-import-json', JSON.stringify(graph));
+            await page.click('#llm-import');
+            await page.waitForSelector('.llm-table tbody tr:has-text("smoke import")', { timeout: 20000 });
+            page.once('dialog', (d) => d.accept('smoke renamed'));
+            await page.locator('.llm-table tbody tr', { hasText: 'smoke import' }).locator('.llm-rename').click();
+            await page.waitForSelector('.llm-table tbody tr:has-text("smoke renamed")', { timeout: 20000 });
+            page.once('dialog', (d) => d.accept());
+            await page.locator('.llm-table tbody tr', { hasText: 'smoke renamed' }).locator('.llm-delete').click();
+            await page.locator('.llm-table tbody tr', { hasText: 'smoke renamed' }).waitFor({ state: 'detached', timeout: 20000 });
+            await page.screenshot({ path: `${OUT}/manage-saved-graphs.png` });
+            ok = listed > 0;
+            detail = `listed smoke test graph: ${listed}; import, rename and delete worked`;
+        } catch (e) {
+            detail = e.message;
+        }
+        check('Manage Saved Graphs lists, imports, renames and deletes graphs', ok, detail);
+    } else {
+        skip('Manage Saved Graphs lists, imports, renames and deletes graphs', 'SKIP_KVSTORE set');
+        await page.goto(`${WEB}/en-US/app/${APP}/manage_saved_graphs`);
+        await page.waitForTimeout(8000);
+        const text = (await page.locator('.llm-status').innerText().catch(() => '')).trim();
+        check('Manage Saved Graphs explains that the KV store is unavailable', /KV store is not available/.test(text), text);
+    }
+
     // 1b. Row limit warning (classic): 30 rows with maxRows=10.
     {
         const q = encodeURIComponent(SAMPLE);
@@ -370,6 +447,24 @@ async function openCxtCommand(page, frame, x, y, command) {
         const n = frame ? await frame.locator('canvas').count() : 0;
         await p3.screenshot({ path: `${OUT}/studio-explorer.png` });
         check('Studio viz renders in Link Analysis Explorer', n > 0, `${n} canvases`);
+
+        let exportDetail = '';
+        let exportOk = false;
+        try {
+            const box = await (await frame.frameElement()).boundingBox();
+            await cxtCommand(p3, frame, box.x + 40, box.y + 40, 'Menu', '#menu_select');
+            await frame.fill('#menu_select', 'Export Graph JSON');
+            await frame.click('.lla-modal-footer .btn-primary');
+            await p3.waitForTimeout(1000);
+            const json = await frame.locator('#lla_export_json').inputValue();
+            const parsed = JSON.parse(json);
+            exportOk = !!(parsed.elements && parsed.elements.nodes && parsed.elements.nodes.length);
+            exportDetail = `${json.length} characters, ${parsed.elements.nodes.length} nodes`;
+            await frame.click('.lla-modal-footer .btn-primary').catch(() => {});
+        } catch (e) {
+            exportDetail = e.message;
+        }
+        check('Studio "Export Graph JSON" shows the graph as JSON', exportOk, exportDetail);
 
         if (globalThis.savedGraphId) {
             await p3.goto(`${WEB}/en-US/app/${APP}/link_analysis_historical_view?form.cytoId=${globalThis.savedGraphId}`);

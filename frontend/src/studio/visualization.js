@@ -20,6 +20,8 @@ const DEFAULT_OPTIONS = {
     directed: false,
     recursiveLookup: true,
     maxRows: 10000,
+    nodeSize: 'fixed',
+    largeGraphNodes: 2000,
 };
 
 let currentTheme = 'light';
