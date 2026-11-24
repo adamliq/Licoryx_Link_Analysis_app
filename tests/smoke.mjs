@@ -104,6 +104,22 @@ const studioDefinition = {
 };
 const studioDashboard = `<dashboard version="2" theme="light"><label>LLA smoke studio</label><definition><![CDATA[${JSON.stringify(studioDefinition)}]]></definition></dashboard>`;
 
+// Wait (up to ~5 minutes) for the KV store; returns true when ready.
+async function waitForKvStore() {
+    for (let i = 0; i < 30; i++) {
+        try {
+            const status = await rest('/services/kvstore/status');
+            const current = status.entry[0].content.current.status;
+            if (current === 'ready') return true;
+            console.log(`      info: kvstore status ${current}, waiting...`);
+        } catch (e) {
+            console.log(`      info: kvstore status unavailable (${e.message.slice(0, 80)}), waiting...`);
+        }
+        await new Promise((r) => setTimeout(r, 10000));
+    }
+    return false;
+}
+
 async function login(page) {
     await page.goto(`${WEB}/en-US/account/login`);
     await page.fill('input[name=username]', USER);
@@ -215,7 +231,16 @@ async function openCxtCommand(page, frame, x, y, command) {
         check('Search Nodes works repeatedly and keeps suggestions', searchOk, detail);
 
         // Save State to the KV store (classic default).
-        const before = (await rest(`/servicesNS/nobody/${APP}/storage/collections/data/cyto_graphs`)).length || 0;
+        const kvReady = await waitForKvStore();
+        const listGraphs = async () => {
+            try {
+                const docs = await rest(`/servicesNS/nobody/${APP}/storage/collections/data/cyto_graphs`);
+                return Array.isArray(docs) ? docs : [];
+            } catch (e) {
+                return [];
+            }
+        };
+        const before = (await listGraphs()).length;
         let saveDetail = '';
         try {
             await cxtCommand(page, page, cyBox.x + 30, cyBox.y + 30, 'Menu', '#menu_select');
@@ -231,9 +256,10 @@ async function openCxtCommand(page, frame, x, y, command) {
         } catch (e) {
             saveDetail = e.message;
         }
-        const docs = await rest(`/servicesNS/nobody/${APP}/storage/collections/data/cyto_graphs`);
-        const saved = Array.isArray(docs) ? docs.find((d) => d.description === 'smoke test graph') : null;
-        check('Save State stores the graph in the KV store (no token)', !!saved && docs.length > before, saveDetail);
+        const docs = await listGraphs();
+        const saved = docs.find((d) => d.description === 'smoke test graph');
+        check('Save State stores the graph in the KV store (no token)', !!saved && docs.length > before,
+            kvReady ? saveDetail : `KV store not ready (${kvReady === null ? 'unknown' : 'status check failed'}); ${saveDetail}`);
         globalThis.savedGraphId = saved && saved.graph_id;
         check('no page errors on the search page', errors.length === 0, errors.join(' | '));
     }

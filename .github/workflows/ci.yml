@@ -99,10 +99,23 @@ jobs:
           for i in $(seq 1 90); do
             status=$(docker inspect -f '{{.State.Health.Status}}' splunk)
             echo "health: $status"
-            [ "$status" = healthy ] && exit 0
+            [ "$status" = healthy ] && break
             sleep 10
           done
-          docker logs splunk | tail -50
+          if [ "$status" != healthy ]; then docker logs splunk | tail -50; exit 1; fi
+
+      - name: Wait for the KV store
+        run: |
+          # Save State uses the KV store; on a fresh container it can take a while to start.
+          for i in $(seq 1 60); do
+            kv=$(curl -sk -u "admin:$SPLUNK_PASSWORD" "https://localhost:8089/services/kvstore/status?output_mode=json" \
+              | python3 -c "import json,sys; print(json.load(sys.stdin)['entry'][0]['content']['current']['status'])" 2>/dev/null || echo unknown)
+            echo "kvstore: $kv"
+            [ "$kv" = ready ] && exit 0
+            sleep 10
+          done
+          echo "::error::KV store did not become ready"
+          docker exec -u root splunk sh -c 'tail -60 /opt/splunk/var/log/splunk/mongod.log; grep -i kvstore /opt/splunk/var/log/splunk/splunkd.log | tail -30' || true
           exit 1
 
       - uses: actions/setup-node@v4
