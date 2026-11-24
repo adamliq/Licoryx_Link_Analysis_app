@@ -143,8 +143,20 @@ async function dismissPopups(page) {
     }
 }
 
+// With the KV store down, Splunk Web's own "Recently viewed" / "Favorites" features
+// (KV collections RecentlyViewedKO, Favorites in the system app) parse Splunk's XML
+// error reply as JSON and throw this. It is not caused by the app, so it is only
+// tolerated when SKIP_KVSTORE is set.
+const SPLUNK_KV_DOWN_ERROR = /Unexpected token '<', "<\?xml vers"\.\.\. is not valid JSON/;
+
 function collectErrors(page, sink) {
-    page.on('pageerror', (e) => sink.push(`pageerror: ${e.message}`));
+    page.on('pageerror', (e) => {
+        if (SKIP_KVSTORE && SPLUNK_KV_DOWN_ERROR.test(e.message)) {
+            console.log(`      info: ignored Splunk Web KV-store error (SKIP_KVSTORE): ${e.message}`);
+            return;
+        }
+        sink.push(`pageerror: ${e.message}`);
+    });
     page.on('console', (m) => {
         if (m.type() !== 'error') return;
         const t = m.text();
