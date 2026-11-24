@@ -201,7 +201,7 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on every push and pull request:
 
 ### Releasing
 1. Update `version` in `default/app.conf` (both stanzas) and `app.manifest`, and add a `#### <version>` section to the release notes below.
-2. Merge to `master`, then push a tag: `git tag v<version> && git push origin v<version>`.
+2. Merge to `master`, then either push a tag (`git tag v<version> && git push origin v<version>`) or run *Actions > Release > Run workflow* on `master` with the version (the tag is created for you).
 3. `.github/workflows/release.yml` checks the tag matches `app.conf`, runs the unit tests, build check and AppInspect, and publishes a GitHub Release with `licoryx_link_analysis_app-<version>.tgz` and the AppInspect report attached, using the release notes section as the description.
 
 ### Release Notes
