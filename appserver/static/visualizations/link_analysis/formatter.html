@@ -38,4 +38,15 @@
         <splunk-text-input name="{{VIZ_NAMESPACE}}.maxRows" value="10000">
         </splunk-text-input>
     </splunk-control-group>
+    <splunk-control-group label="Node size">
+        <splunk-select name="{{VIZ_NAMESPACE}}.nodeSize" value="fixed">
+            <option value="fixed">Fixed</option>
+            <option value="degree">By number of connections</option>
+            <option value="count">By total count</option>
+        </splunk-select>
+    </splunk-control-group>
+    <splunk-control-group label="Large graph threshold (nodes)">
+        <splunk-text-input name="{{VIZ_NAMESPACE}}.largeGraphNodes" value="2000">
+        </splunk-text-input>
+    </splunk-control-group>
 </form>

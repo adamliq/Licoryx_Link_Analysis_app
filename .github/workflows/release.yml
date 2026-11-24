@@ -1,0 +1,79 @@
+name: Release
+
+# Push a tag like v2.3.0 (matching [launcher]/[id] version in default/app.conf) to build,
+# check and publish a GitHub Release with the Splunk app package attached.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Tag matches app version
+        run: |
+          VERSION=$(sed -n 's/^version *= *//p' default/app.conf | head -1)
+          echo "app.conf version: $VERSION, tag: $GITHUB_REF_NAME"
+          [ "v$VERSION" = "$GITHUB_REF_NAME" ] || { echo "::error::Tag $GITHUB_REF_NAME does not match app.conf version $VERSION"; exit 1; }
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Install, unit test and build
+        working-directory: frontend
+        run: |
+          npm ci
+          npm test
+          npm run build
+
+      - name: Committed bundles match the source
+        run: git diff --exit-code --stat -- appserver/static
+
+      - name: Package app
+        run: ./package.sh
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: AppInspect (Splunk Cloud checks)
+        run: |
+          pip install --quiet splunk-appinspect
+          splunk-appinspect inspect "dist/licoryx_link_analysis_app-$VERSION.tgz" --mode precert --included-tags cloud \
+            --output-file appinspect.json --data-format json
+          python3 - <<'PY'
+          import json, sys
+          s = json.load(open('appinspect.json'))['summary']
+          print(s)
+          sys.exit(1 if s.get('error') or s.get('failure') else 0)
+          PY
+
+      - name: Release notes from README
+        run: |
+          python3 - <<'PY'
+          import os, re
+          version = os.environ['VERSION']
+          text = open('README.md', encoding='utf-8').read()
+          m = re.search(r'^#### ' + re.escape(version) + r'\s*\n(.*?)(?=^#### |^### |\Z)', text, re.S | re.M)
+          notes = m.group(1).strip() if m else f'Licoryx Link Analysis App {version}.'
+          notes += '\n\nInstall `licoryx_link_analysis_app-' + version + '.tgz` via Apps > Manage Apps > Install app from file.'
+          open('release-notes.md', 'w', encoding='utf-8').write(notes + '\n')
+          print(notes)
+          PY
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "dist/licoryx_link_analysis_app-$VERSION.tgz" appinspect.json \
+            --title "Licoryx Link Analysis App $VERSION" --notes-file release-notes.md --verify-tag

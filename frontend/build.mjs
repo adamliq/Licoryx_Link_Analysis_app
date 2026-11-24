@@ -3,6 +3,7 @@
  * Builds both visualizations from the shared source in src/:
  *   src/classic/visualization.js -> appserver/static/visualizations/link_analysis/visualization.js (AMD)
  *   src/studio/visualization.js  -> appserver/static/visualizations/link_analysis_studio/visualization.js (ESM)
+ *   src/manage/manage_graphs.js  -> appserver/static/manage_graphs.js (Manage Saved Graphs dashboard)
  * and copies src/studio/config.json next to the Studio bundle.
  *
  *   node build.mjs           production build (minified)
@@ -74,3 +75,12 @@ await build({
 });
 copyFileSync(join(here, 'src', 'studio', 'config.json'), join(vizRoot, 'link_analysis_studio', 'config.json'));
 console.log('Built studio  -> appserver/static/visualizations/link_analysis_studio/visualization.js');
+
+// Manage Saved Graphs dashboard script (classic Simple XML dashboard, plain script).
+await build({
+    ...common,
+    entryPoints: [join(here, 'src', 'manage', 'manage_graphs.js')],
+    outfile: join(here, '..', 'appserver', 'static', 'manage_graphs.js'),
+    format: 'iife',
+});
+console.log('Built manage  -> appserver/static/manage_graphs.js');

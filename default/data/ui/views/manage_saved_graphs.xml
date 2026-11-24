@@ -1,0 +1,11 @@
+<dashboard version="1.1" script="manage_graphs.js" theme="light">
+  <label>Manage Saved Graphs</label>
+  <description>Open, rename, delete or import graphs saved with Save State (app KV store collection cyto_graphs).</description>
+  <row>
+    <panel>
+      <html>
+        <div id="llm-root">Loading saved graphs...</div>
+      </html>
+    </panel>
+  </row>
+</dashboard>

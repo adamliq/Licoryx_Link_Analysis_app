@@ -34,7 +34,7 @@
             "type": "ds.search",
             "name": "Saved states",
             "options": {
-                "query": "| inputlookup cyto_graphs\n| eval _time=saved_at\n| append [search index=cyto sourcetype=cyto:graph graph_id=* | fields _time graph_id description]\n| eval label=description.\" : \".strftime(_time, \"%c\").\" : \".graph_id, value=graph_id\n| sort 0 - _time\n| dedup value\n| table label value",
+                "query": "| inputlookup cyto_graphs\n| eval _time=saved_at\n| append [search index=cyto sourcetype=cyto:graph graph_id=* | fields _time graph_id description]\n| eval label=description.\" : \".strftime(_time, \"%c\").if(isnotnull(saved_by) AND saved_by!=\"\", \" : \".saved_by, \"\").\" : \".graph_id, value=graph_id\n| sort 0 - _time\n| dedup value\n| table label value",
                 "queryParameters": {
                     "earliest": "-365d@d",
                     "latest": "now"

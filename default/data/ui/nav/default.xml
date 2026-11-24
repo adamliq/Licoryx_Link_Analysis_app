@@ -2,5 +2,6 @@
   <view name="search" default="true" />
   <view name="link_analysis_explorer" />
   <view name="link_analysis_historical_view" />
+  <view name="manage_saved_graphs" />
   <view name="dashboards" />
 </nav>
