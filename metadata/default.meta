@@ -16,3 +16,12 @@ export = system
 
 [visualizations/link_analysis_studio]
 export = system
+
+### KV STORE: saved graphs (Save State). Any user who can use the app can save
+### and read graphs; only admins can delete the collection definition.
+
+[collections/cyto_graphs]
+access = read : [ * ], write : [ * ]
+
+[transforms/cyto_graphs]
+access = read : [ * ], write : [ admin, sc_admin ]

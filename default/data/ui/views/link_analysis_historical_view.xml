@@ -4,7 +4,7 @@
     <definition><![CDATA[
 {
     "title": "Link Analysis Historical View",
-    "description": "Load a graph previously saved with the Save State menu (index=cyto, sourcetype=cyto:graph).",
+    "description": "Load a graph previously saved with the Save State menu (app KV store cyto_graphs, or index=cyto via HTTP Event Collector).",
     "inputs": {
         "input_state": {
             "type": "input.dropdown",
@@ -34,7 +34,7 @@
             "type": "ds.search",
             "name": "Saved states",
             "options": {
-                "query": "index=cyto sourcetype=cyto:graph graph_id=*\n| eval label=description.\" : \".strftime(_time, \"%c\").\" : \".graph_id, value=graph_id\n| dedup value\n| table label value",
+                "query": "| inputlookup cyto_graphs\n| eval _time=saved_at\n| append [search index=cyto sourcetype=cyto:graph graph_id=* | fields _time graph_id description]\n| eval label=description.\" : \".strftime(_time, \"%c\").\" : \".graph_id, value=graph_id\n| sort 0 - _time\n| dedup value\n| table label value",
                 "queryParameters": {
                     "earliest": "-365d@d",
                     "latest": "now"
@@ -45,7 +45,7 @@
             "type": "ds.search",
             "name": "Selected state",
             "options": {
-                "query": "index=cyto sourcetype=cyto:graph graph_id=\"$cytoId$\"\n| head 1\n| table _raw",
+                "query": "| inputlookup cyto_graphs where graph_id=$cytoId|s$\n| fields graph_info\n| append [search index=cyto sourcetype=cyto:graph graph_id=$cytoId|s$ | head 1 | fields _raw]\n| head 1\n| table graph_info _raw",
                 "queryParameters": {
                     "earliest": "-365d@h",
                     "latest": "now"
