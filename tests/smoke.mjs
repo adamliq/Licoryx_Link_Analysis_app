@@ -9,6 +9,8 @@
  * Requires Playwright with Chromium. Exits non-zero if any check fails.
  * Set SKIP_STUDIO=1 for Splunk versions without the Dashboard Studio
  * extension framework (before 10.4): only the classic checks run.
+ * Set SKIP_KVSTORE=1 when the host's KV store cannot run (e.g. Splunk 10.4's
+ * MongoDB on Linux kernel 6.19+): the KV-store checks are reported as SKIP.
  */
 import { createRequire } from 'node:module';
 import { mkdirSync } from 'node:fs';
@@ -23,6 +25,7 @@ const PASS = process.env.SPLUNK_PASSWORD;
 const OUT = process.argv[2] || 'smoke-screenshots';
 const APP = 'licoryx_link_analysis_app';
 const SKIP_STUDIO = /^(1|true|yes)$/i.test(process.env.SKIP_STUDIO || '');
+const SKIP_KVSTORE = /^(1|true|yes)$/i.test(process.env.SKIP_KVSTORE || '');
 if (!PASS) {
     console.error('SPLUNK_PASSWORD is required');
     process.exit(2);
@@ -46,6 +49,11 @@ const results = [];
 function check(name, ok, detail = '') {
     results.push({ name, ok, detail });
     console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? '  - ' + detail : ''}`);
+}
+const skipped = [];
+function skip(name, reason) {
+    skipped.push(name);
+    console.log(`SKIP  ${name}  - ${reason}`);
 }
 
 const SAMPLE = '| makeresults count=30 | streamstats count as n | eval src_ip="10.0.".(n%5).".".(n%7), dest_ip="dc-".(n%4), count=n | table src_ip dest_ip count';
@@ -231,7 +239,7 @@ async function openCxtCommand(page, frame, x, y, command) {
         check('Search Nodes works repeatedly and keeps suggestions', searchOk, detail);
 
         // Save State to the KV store (classic default).
-        const kvReady = await waitForKvStore();
+        const kvReady = SKIP_KVSTORE ? false : await waitForKvStore();
         const listGraphs = async () => {
             try {
                 const docs = await rest(`/servicesNS/nobody/${APP}/storage/collections/data/cyto_graphs`);
@@ -242,7 +250,7 @@ async function openCxtCommand(page, frame, x, y, command) {
         };
         const before = (await listGraphs()).length;
         let saveDetail = '';
-        try {
+        if (!SKIP_KVSTORE) try {
             await cxtCommand(page, page, cyBox.x + 30, cyBox.y + 30, 'Menu', '#menu_select');
             await page.fill('#menu_select', 'Save State');
             await page.click('.lla-modal-footer .btn-primary');
@@ -258,8 +266,12 @@ async function openCxtCommand(page, frame, x, y, command) {
         }
         const docs = await listGraphs();
         const saved = docs.find((d) => d.description === 'smoke test graph');
-        check('Save State stores the graph in the KV store (no token)', !!saved && docs.length > before,
-            kvReady ? saveDetail : `KV store not ready (${kvReady === null ? 'unknown' : 'status check failed'}); ${saveDetail}`);
+        if (SKIP_KVSTORE) {
+            skip('Save State stores the graph in the KV store (no token)', 'SKIP_KVSTORE set');
+        } else {
+            check('Save State stores the graph in the KV store (no token)', !!saved && docs.length > before,
+                kvReady ? saveDetail : `KV store not ready; ${saveDetail}`);
+        }
         globalThis.savedGraphId = saved && saved.graph_id;
         check('no page errors on the search page', errors.length === 0, errors.join(' | '));
     }
@@ -354,6 +366,8 @@ async function openCxtCommand(page, frame, x, y, command) {
             const shown = f2 ? await f2.locator('.lla-saved').evaluate((el) => getComputedStyle(el).display !== 'none' && !!el.querySelector('canvas')) : false;
             await p3.screenshot({ path: `${OUT}/studio-historical.png` });
             check('Historical View (Studio) loads the KV-store graph', shown, globalThis.savedGraphId);
+        } else if (SKIP_KVSTORE) {
+            skip('Historical View (Studio) loads the KV-store graph', 'SKIP_KVSTORE set');
         } else {
             check('Historical View (Studio) loads the KV-store graph', false, 'nothing was saved');
         }
@@ -363,7 +377,8 @@ async function openCxtCommand(page, frame, x, y, command) {
 
     await browser.close();
     const failed = results.filter((r) => !r.ok);
-    console.log(`\n${results.length - failed.length}/${results.length} checks passed`);
+    console.log(`\n${results.length - failed.length}/${results.length} checks passed` +
+        (skipped.length ? `, ${skipped.length} skipped` : ''));
     process.exit(failed.length ? 1 : 0);
 })().catch((e) => {
     console.error(e);
