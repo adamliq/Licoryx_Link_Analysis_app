@@ -1,11 +1,18 @@
 name: Release
 
-# Push a tag like v2.3.0 (matching [launcher]/[id] version in default/app.conf) to build,
-# check and publish a GitHub Release with the Splunk app package attached.
+# Publish a GitHub Release with the Splunk app package attached, either by
+#  - pushing a tag like v2.3.0 (matching the version in default/app.conf), or
+#  - running this workflow manually (Actions > Release > Run workflow) with the version;
+#    the tag is then created on the selected branch's commit.
 on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (must match default/app.conf), e.g. 2.3.0"
+        required: true
 
 permissions:
   contents: write
@@ -23,11 +30,15 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Tag matches app version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
           VERSION=$(sed -n 's/^version *= *//p' default/app.conf | head -1)
-          echo "app.conf version: $VERSION, tag: $GITHUB_REF_NAME"
-          [ "v$VERSION" = "$GITHUB_REF_NAME" ] || { echo "::error::Tag $GITHUB_REF_NAME does not match app.conf version $VERSION"; exit 1; }
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then TAG="v${INPUT_VERSION#v}"; else TAG="$GITHUB_REF_NAME"; fi
+          echo "app.conf version: $VERSION, tag: $TAG"
+          [ "v$VERSION" = "$TAG" ] || { echo "::error::Tag $TAG does not match app.conf version $VERSION"; exit 1; }
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
 
       - name: Install, unit test and build
         working-directory: frontend
@@ -75,5 +86,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" "dist/licoryx_link_analysis_app-$VERSION.tgz" appinspect.json \
-            --title "Licoryx Link Analysis App $VERSION" --notes-file release-notes.md --verify-tag
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then TARGET="--target $GITHUB_SHA"; else TARGET="--verify-tag"; fi
+          gh release create "$TAG" "dist/licoryx_link_analysis_app-$VERSION.tgz" appinspect.json \
+            --title "Licoryx Link Analysis App $VERSION" --notes-file release-notes.md $TARGET
