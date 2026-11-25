@@ -59,6 +59,8 @@ function skip(name, reason) {
 const SAMPLE = '| makeresults count=30 | streamstats count as n | eval src_ip="10.0.".(n%5).".".(n%7), dest_ip="dc-".(n%4), count=n | table src_ip dest_ip count';
 const TWO_NODES = '| makeresults | eval src_ip="alpha", dest_ip="bravo", count=1 | table src_ip dest_ip count';
 const CLASSIC = `${APP}.link_analysis`;
+// Expand search used by the tests: three neighbours of "alpha" (the node name is appended as a quoted term).
+const EXPAND_BASE = '| makeresults count=3 | streamstats count as n | eval src_ip="alpha", dest_ip="nbr-".n, count=1, _raw=src_ip." ".dest_ip | search';
 
 // Classic (Simple XML) dashboard: two link analysis panels + a drilldown token.
 const classicDashboard = `<dashboard version="1.1" theme="light">
@@ -68,6 +70,8 @@ const classicDashboard = `<dashboard version="1.1" theme="light">
       <viz type="${CLASSIC}">
         <search><query>${TWO_NODES.replace(/</g, '&lt;')}</query><earliest>-15m</earliest><latest>now</latest></search>
         <option name="${CLASSIC}.layoutStyle">grid</option>
+        <option name="${CLASSIC}.expandBase">${EXPAND_BASE.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;')}</option>
+        <option name="${CLASSIC}.expandStats">| stats count by src_ip dest_ip</option>
         <option name="height">400</option>
         <drilldown><set token="clicked">$click.name$ src=$row.src_ip$ dest=$row.dest_ip$</set></drilldown>
       </viz>
@@ -89,12 +93,13 @@ const studioDefinition = {
     dataSources: {
         ds_two: { type: 'ds.search', options: { query: TWO_NODES, queryParameters: { earliest: '-15m', latest: 'now' } } },
         ds_big: { type: 'ds.search', options: { query: BIG, queryParameters: { earliest: '-15m', latest: 'now' } } },
+        ds_expand: { type: 'ds.search', options: { query: `${EXPAND_BASE} $expand_node|s$ | stats count by src_ip dest_ip`, queryParameters: { earliest: '-15m', latest: 'now' } } },
     },
     visualizations: {
         viz_two: {
-            type: STUDIO, title: 'two', dataSources: { primary: 'ds_two' },
+            type: STUDIO, title: 'two', dataSources: { primary: 'ds_two', expand: 'ds_expand' },
             options: { layoutStyle: 'grid' },
-            eventHandlers: [{ type: 'drilldown.setToken', options: { tokens: [{ token: 'clicked', key: 'value' }] } }],
+            eventHandlers: [{ type: 'drilldown.setToken', options: { tokens: [{ token: 'clicked', key: 'value' }, { token: 'expand_node', key: 'value' }] } }],
         },
         viz_big: { type: STUDIO, title: 'big', dataSources: { primary: 'ds_big' }, options: { layoutStyle: 'grid', maxRows: 15000 } },
         viz_md: { type: 'splunk.markdown', options: { markdown: 'clicked=$clicked$' } },
@@ -200,6 +205,47 @@ async function openCxtCommand(page, frame, x, y, command) {
         await page.waitForTimeout(400);
     }
     throw new Error(`context menu command "${command}" not reachable`);
+}
+
+// Move along the middle of a graph until the hover tooltip shows; returns {x, y, text} or null.
+async function findNode(page, frame, box, wanted) {
+    for (let fx = 0.04; fx < 0.98; fx += 0.02) {
+        const x = box.x + box.width * fx;
+        const y = box.y + box.height / 2;
+        await page.mouse.move(x, y);
+        await page.waitForTimeout(120);
+        const tip = frame.locator('.lla-tooltip');
+        const visible = await tip.first().evaluate((el) => el.style.display === 'block').catch(() => false);
+        if (visible) {
+            const text = (await tip.first().innerText()).trim();
+            if (!wanted || text.startsWith(wanted)) return { x, y, text };
+        }
+    }
+    return null;
+}
+
+// Choose a command from a node's context menu.
+async function nodeCommand(page, frame, at, command) {
+    await page.mouse.move(at.x, at.y);
+    await page.mouse.down({ button: 'right' });
+    await page.waitForTimeout(600);
+    const item = frame.locator('.cxtmenu-item', { hasText: command }).first();
+    const box = await item.boundingBox();
+    if (!box) {
+        await page.mouse.up({ button: 'right' });
+        throw new Error(`node menu command "${command}" not found`);
+    }
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 5 });
+    await page.mouse.up({ button: 'right' });
+    await page.waitForTimeout(600);
+}
+
+// Run a Menu item via the toolbar's Menu button of the first visualization in scope.
+async function menuItem(page, scope, item) {
+    await scope.locator('.lla-tool-menu').first().click();
+    await page.fill('#menu_select', item);
+    await page.click('.lla-modal-footer .btn-primary');
+    await page.waitForTimeout(1200);
 }
 
 (async () => {
@@ -329,6 +375,37 @@ async function openCxtCommand(page, frame, x, y, command) {
         check('large graphs switch slow layouts to grid with a notice', /using the "grid" layout/.test(notices), notices);
     }
 
+    // 1e. Timeline (_time), node types (src_type/dest_type) with shapes, edge width by count, WebGL renderer.
+    {
+        const TIMED = '| makeresults count=12 | streamstats count as n | eval _time=_time-n*300, src_ip="host".(n%4), dest_ip="srv".(n%3), count=n, src_type="workstation", dest_type="server" | table src_ip dest_ip count src_type dest_type _time';
+        await page.goto(`${WEB}/en-US/app/${APP}/search?q=${encodeURIComponent(TIMED)}&earliest=-24h&latest=now&display.page.search.tab=visualizations&display.general.type=visualizations&display.visualizations.type=custom&display.visualizations.custom.type=${CLASSIC}&display.visualizations.custom.${CLASSIC}.edgeWidth=count`);
+        await page.waitForSelector('.lla-cy canvas', { timeout: 90000, state: 'attached' }).catch(() => {});
+        await page.waitForTimeout(4000);
+        const types = (await page.locator('.lla-legend-type').allTextContents()).map((t) => t.trim().slice(1)).sort();
+        check('src_type/dest_type give node shapes with a legend', types.join(',') === 'server,workstation', types.join(','));
+        const slider = page.locator('.lla-timeline-slider');
+        let tl = '';
+        if (await slider.count()) {
+            const last = await page.locator('.lla-timeline-label').innerText();
+            await slider.fill('0');
+            await page.waitForTimeout(500);
+            const first = await page.locator('.lla-timeline-label').innerText();
+            tl = first && last && first !== last ? `${first} .. ${last}` : '';
+        }
+        check('_time adds a timeline slider', !!tl, tl || 'no timeline');
+        await page.screenshot({ path: `${OUT}/classic-timeline.png` });
+
+        const errors = [];
+        const onErr = (e) => errors.push(e.message);
+        page.on('pageerror', onErr);
+        await page.goto(`${WEB}/en-US/app/${APP}/search?q=${encodeURIComponent(SAMPLE)}&earliest=-15m&latest=now&display.page.search.tab=visualizations&display.general.type=visualizations&display.visualizations.type=custom&display.visualizations.custom.type=${CLASSIC}&display.visualizations.custom.${CLASSIC}.renderer=webgl`);
+        await page.waitForSelector('.lla-cy canvas', { timeout: 90000, state: 'attached' }).catch(() => {});
+        await page.waitForTimeout(4000);
+        const n = await page.locator('.lla-cy canvas').count();
+        page.off('pageerror', onErr);
+        check('WebGL renderer option renders without errors', n > 0 && errors.length === 0, `${n} canvases ${errors.join(' | ')}`);
+    }
+
     // 1d. Manage Saved Graphs: list, rename, import (from Export Graph JSON format) and delete.
     if (!SKIP_KVSTORE) {
         let detail = '';
@@ -344,11 +421,12 @@ async function openCxtCommand(page, frame, x, y, command) {
             await page.fill('#llm-import-json', JSON.stringify(graph));
             await page.click('#llm-import');
             await page.waitForSelector('.llm-table tbody tr:has-text("smoke import")', { timeout: 20000 });
-            page.once('dialog', (d) => d.accept('smoke renamed'));
             await page.locator('.llm-table tbody tr', { hasText: 'smoke import' }).locator('.llm-rename').click();
+            await page.fill('#llm-dialog-input', 'smoke renamed');
+            await page.click('#llm-dialog-ok');
             await page.waitForSelector('.llm-table tbody tr:has-text("smoke renamed")', { timeout: 20000 });
-            page.once('dialog', (d) => d.accept());
             await page.locator('.llm-table tbody tr', { hasText: 'smoke renamed' }).locator('.llm-delete').click();
+            await page.click('#llm-dialog-ok');
             await page.locator('.llm-table tbody tr', { hasText: 'smoke renamed' }).waitFor({ state: 'detached', timeout: 20000 });
             await page.screenshot({ path: `${OUT}/manage-saved-graphs.png` });
             ok = listed > 0;
@@ -357,6 +435,26 @@ async function openCxtCommand(page, frame, x, y, command) {
             detail = e.message;
         }
         check('Manage Saved Graphs lists, imports, renames and deletes graphs', ok, detail);
+
+        // Imported graphs are sanitised: no styles or URLs are stored.
+        try {
+            const evil = {
+                style: [{ selector: 'node', style: { 'background-image': 'http://127.0.0.1:9/beacon-style.png' } }],
+                elements: { nodes: [
+                    { data: { id: 'e0', label: 'evil', color: 'url(http://127.0.0.1:9/beacon-color.png)' }, position: { x: 0, y: 0 }, style: { 'background-image': 'http://127.0.0.1:9/beacon-inline.png' } },
+                    { data: { id: 'e1', label: 'ok' }, position: { x: 100, y: 0 } },
+                ], edges: [{ data: { id: 'x', source: 'e0', target: 'e1' } }] },
+            };
+            await page.fill('#llm-import-description', 'smoke evil');
+            await page.fill('#llm-import-json', JSON.stringify(evil));
+            await page.click('#llm-import');
+            await page.waitForSelector('.llm-table tbody tr:has-text("smoke evil")', { timeout: 20000 });
+            const docs = await rest(`/servicesNS/nobody/${APP}/storage/collections/data/cyto_graphs`);
+            const stored = docs.find((d) => d.description === 'smoke evil');
+            check('imported graphs are stored without styles or URLs', !!stored && !/127\.0\.0\.1|background-image|url\(/.test(stored.graph_info), stored ? stored.graph_info.slice(0, 120) : 'not stored');
+        } catch (e) {
+            check('imported graphs are stored without styles or URLs', false, e.message);
+        }
     } else {
         skip('Manage Saved Graphs lists, imports, renames and deletes graphs', 'SKIP_KVSTORE set');
         await page.goto(`${WEB}/en-US/app/${APP}/manage_saved_graphs`);
@@ -399,6 +497,50 @@ async function openCxtCommand(page, frame, x, y, command) {
         }
         await p2.screenshot({ path: `${OUT}/classic-dashboard.png` });
         check('classic double-click drilldown sets $click.name$ and $row.<field>$', /src_ip src=alpha|dest_ip .*dest=bravo/.test(clicked), clicked);
+
+        // Toolbar + hover details + Expand (classic runs the expand search itself).
+        const panelA = p2.locator('.lla-cy').first();
+        const vizA = panelA.locator('xpath=..');
+        const tools = await vizA.locator('.lla-toolbar .lla-tool').allTextContents();
+        check('toolbar shows Search, Menu, Fit and Save', tools.join(',') === 'Search,Menu,Fit,Save', tools.join(','));
+        const alpha = await findNode(p2, vizA, box, 'alpha');
+        check('hovering a node shows its details', !!alpha && /Connections:\s*1/.test(alpha.text), alpha ? alpha.text.replace(/\n/g, ' | ') : 'no tooltip');
+        let expandDetail = '';
+        let expandOk = false;
+        if (alpha) {
+            try {
+                const listId = (await panelA.getAttribute('id')).replace(/-cy$/, '-node_list');
+                const before = await p2.locator(`datalist#${listId} option`).count();
+                await nodeCommand(p2, p2, alpha, 'Expand');
+                await vizA.locator('.lla-notice', { hasText: 'Expanded "alpha"' }).waitFor({ timeout: 60000 });
+                const after = await p2.locator(`datalist#${listId} option`).count();
+                expandDetail = `${(await vizA.locator('.lla-notice').allTextContents()).join(' ')} (node list ${before} -> ${after})`;
+                expandOk = after === before + 3;
+            } catch (e) {
+                expandDetail = e.message;
+            }
+        }
+        check('Expand adds the neighbours found by the expand search', expandOk, expandDetail);
+        await p2.screenshot({ path: `${OUT}/classic-expand.png` });
+
+        // Analytics, filter and image export via the toolbar's Menu button.
+        await menuItem(p2, vizA, 'Size by PageRank');
+        const pr = (await vizA.locator('.lla-notice').allTextContents()).join(' ');
+        check('Menu > Size by PageRank', /PageRank/.test(pr), pr);
+        await menuItem(p2, vizA, 'Find Clusters');
+        const clusters = await vizA.locator('.lla-legend-item', { hasText: 'Cluster' }).count();
+        check('Menu > Find Clusters colours clusters with a legend', clusters > 0, `${clusters} clusters`);
+        await menuItem(p2, vizA, 'Filter by Connections');
+        await p2.fill('#lla_min_degree', '2');
+        await p2.click('.lla-modal-footer .btn-primary');
+        await p2.waitForTimeout(800);
+        const filt = (await vizA.locator('.lla-notice').allTextContents()).join(' ');
+        check('Menu > Filter by Connections hides low-degree nodes', /hidden/.test(filt), filt);
+        await menuItem(p2, vizA, 'Clear Filters');
+        await menuItem(p2, vizA, 'Export Image (PNG)');
+        const src = await p2.locator('#lla_export_image').getAttribute('src').catch(() => '');
+        check('Menu > Export Image shows a PNG of the graph', /^data:image\/png;base64,/.test(src || '') && src.length > 1000, `${(src || '').length} characters`);
+        await p2.locator('.lla-modal-footer .btn-primary').click().catch(() => {});
         check('no page errors on the classic dashboard', errors.length === 0, errors.join(' | '));
         await p2.close();
     }
@@ -416,6 +558,22 @@ async function openCxtCommand(page, frame, x, y, command) {
             frames.push({ frame: f, box: await (await f.frameElement()).boundingBox() });
         }
         frames.sort((a, b) => a.box.x - b.box.x);
+        // Expand first (fresh expand search), before the double-click test sets the same token.
+        let sExpand = '';
+        let sExpandOk = false;
+        if (frames[0]) {
+            try {
+                const alphaAt = await findNode(p4, frames[0].frame, frames[0].box, 'alpha');
+                if (!alphaAt) throw new Error('alpha not found');
+                await nodeCommand(p4, frames[0].frame, alphaAt, 'Expand');
+                await frames[0].frame.locator('.lla-notice', { hasText: 'Expanded "alpha"' }).waitFor({ timeout: 60000 });
+                sExpand = (await frames[0].frame.locator('.lla-notice').allTextContents()).join(' ');
+                sExpandOk = /3 new nodes/.test(sExpand);
+            } catch (e) {
+                sExpand = e.message;
+            }
+        }
+        check('Studio Expand merges the "expand" data source into the graph', sExpandOk, sExpand);
         let clicked = '';
         if (frames[0]) {
             const box = frames[0].box;
@@ -427,6 +585,7 @@ async function openCxtCommand(page, frame, x, y, command) {
             }
         }
         check('Studio double-click drilldown sets a token to the node name', /clicked=(alpha|bravo)/.test(clicked), clicked);
+
         const warning = frames[1] ? (await frames[1].frame.locator('.lla-row-warning').allTextContents()).join(' ') : '';
         console.log(`      info: Studio row warning for 20000-row search with maxRows=15000: "${warning}"`);
         check('Studio warns when rows exceed "Maximum rows"', /first 15000 of 20000/.test(warning), warning || 'no warning shown');
@@ -477,6 +636,26 @@ async function openCxtCommand(page, frame, x, y, command) {
             skip('Historical View (Studio) loads the KV-store graph', 'SKIP_KVSTORE set');
         } else {
             check('Historical View (Studio) loads the KV-store graph', false, 'nothing was saved');
+        }
+        if (!SKIP_KVSTORE) {
+            // A crafted graph written straight to the KV store (bypassing the import sanitiser)
+            // must still not make the Historical View load external URLs.
+            const requests = [];
+            const onReq = (r) => { if (r.url().includes('127.0.0.1:9')) requests.push(r.url()); };
+            p3.on('request', onReq);
+            await rest(`/servicesNS/nobody/${APP}/storage/collections/data/cyto_graphs`, { method: 'POST', json: {
+                graph_id: 'smokeEvilDirect', description: 'smoke evil direct', saved_at: Math.floor(Date.now() / 1000),
+                graph_info: JSON.stringify({
+                    style: [{ selector: 'node', style: { 'background-image': 'http://127.0.0.1:9/beacon-style.png' } }],
+                    elements: { nodes: [{ data: { id: 'a', label: 'evil', color: 'url(http://127.0.0.1:9/c.png)' }, position: { x: 0, y: 0 }, style: { 'background-image': 'http://127.0.0.1:9/beacon-inline.png' } }, { data: { id: 'b', label: 'ok' }, position: { x: 80, y: 0 } }], edges: [{ data: { id: 'ab', source: 'a', target: 'b' } }] },
+                }),
+            } });
+            await p3.goto(`${WEB}/en-US/app/${APP}/link_analysis_historical_view?form.cytoId=smokeEvilDirect`);
+            await p3.waitForTimeout(20000);
+            const f3 = p3.frames().find((fr) => fr.url() === 'about:srcdoc');
+            const drawn = f3 ? await f3.locator('.lla-saved canvas').count() : 0;
+            p3.off('request', onReq);
+            check('Historical View draws crafted saved graphs without loading their URLs', drawn > 0 && requests.length === 0, `canvases=${drawn}, external requests=${requests.length}`);
         }
         check('no page errors on Studio dashboards', errors.length === 0, errors.join(' | '));
         await p3.close();

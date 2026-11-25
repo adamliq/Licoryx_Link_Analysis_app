@@ -78,15 +78,19 @@ export function detectColumns(fields) {
     if (count === -1 && fields.length > 2) {
         const third = String(fields[2] && fields[2].name !== undefined ? fields[2].name : fields[2]).toLowerCase();
         const known = ['line_label', 'line_color', 'line_colour', 'filter_start', 'filter_end', 'remove',
-            'src_group', 'dest_group', 'src_color', 'dest_color', 'src_colour', 'dest_colour'];
+            'src_group', 'dest_group', 'src_color', 'dest_color', 'src_colour', 'dest_colour', 'src_type', 'dest_type', '_time'];
         if (!known.includes(third)) count = 2;
     }
+    const time = fieldIndex(fields, ['_time']);
     return {
         count,
         srcGroup: idx('src_group'),
         destGroup: idx('dest_group'),
         srcColor: idx('src_color', 'src_colour'),
         destColor: idx('dest_color', 'dest_colour'),
+        srcType: idx('src_type'),
+        destType: idx('dest_type'),
+        time: time > 1 ? time : -1,
     };
 }
 
@@ -100,21 +104,23 @@ export function detectColumns(fields) {
 export function nodeAttributes(rows, columns) {
     const nodes = new Map();
     const get = (name) => {
-        if (!nodes.has(name)) nodes.set(name, { group: null, color: null, degree: 0, weight: 0 });
+        if (!nodes.has(name)) nodes.set(name, { group: null, color: null, type: null, degree: 0, weight: 0 });
         return nodes.get(name);
     };
     const value = (row, i) => (i >= 0 && row[i] !== undefined && row[i] !== null && String(row[i]) !== '' ? String(row[i]) : null);
     rows.forEach((row) => {
         const count = columns.count >= 0 ? parseFloat(row[columns.count]) : NaN;
         const w = Number.isFinite(count) ? count : 1;
-        [[row[0], columns.srcGroup, columns.srcColor], [row[1], columns.destGroup, columns.destColor]].forEach(([name, gi, ci]) => {
+        [[row[0], columns.srcGroup, columns.srcColor, columns.srcType], [row[1], columns.destGroup, columns.destColor, columns.destType]].forEach(([name, gi, ci, ti]) => {
             const n = get(name);
             n.degree += 1;
             n.weight += w;
             const g = value(row, gi);
             if (g !== null) n.group = g;
             const c = value(row, ci);
-            if (c !== null) n.color = c;
+            if (c !== null && isSafeColor(c)) n.color = c;
+            const t = value(row, ti === undefined ? -1 : ti);
+            if (t !== null) n.type = t;
         });
     });
     return nodes;
@@ -192,4 +198,198 @@ export function parseGraphJson(text) {
     const graph = parsed && parsed.graph_info ? parsed.graph_info : parsed;
     if (!graph || typeof graph !== 'object' || !graph.elements) throw new Error('JSON has no "elements" (not a Cytoscape graph)');
     return graph;
+}
+
+// ---------------------------------------------------------------------------
+// 2.4.0: safety of saved graphs, node expansion, styling and timeline helpers
+// ---------------------------------------------------------------------------
+
+const NAMED_COLOR = /^[a-z]{3,20}$/i;
+const HEX_COLOR = /^#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
+const FUNC_COLOR = /^(?:rgb|rgba|hsl|hsla)\(\s*[\d.%\s,/+-]+\)$/i;
+
+/** True for plain CSS colours (hex, rgb()/hsl(), or a colour keyword) - never url() or other functions. */
+export function isSafeColor(value) {
+    const v = String(value === undefined || value === null ? '' : value).trim();
+    return HEX_COLOR.test(v) || FUNC_COLOR.test(v) || NAMED_COLOR.test(v);
+}
+
+// Classes the visualization itself adds to elements; anything else in a saved graph is dropped.
+export const KNOWN_CLASSES = ['highlighted', 'nodehighlighted', 'nodehighlightedchildren', 'lla-filtered', 'lla-hidden-time'];
+
+function cleanString(value, max = 1000) {
+    if (value === undefined || value === null) return undefined;
+    const s = String(value);
+    return s.length > max ? s.slice(0, max) : s;
+}
+
+function cleanNumber(value) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : undefined;
+}
+
+function cleanClasses(classes) {
+    const list = Array.isArray(classes) ? classes : String(classes || '').split(/\s+/);
+    return list.filter((c) => KNOWN_CLASSES.includes(c)).join(' ');
+}
+
+function cleanElement(el, kind) {
+    if (!el || typeof el !== 'object' || !el.data || el.data.id === undefined) return null;
+    const d = el.data;
+    const data = { id: cleanString(d.id, 200) };
+    if (kind === 'edges') {
+        if (d.source === undefined || d.target === undefined) return null;
+        data.source = cleanString(d.source, 200);
+        data.target = cleanString(d.target, 200);
+    }
+    const label = cleanString(d.label);
+    if (label !== undefined) data.label = label;
+    if (isSafeColor(d.color)) data.color = String(d.color).trim();
+    ['size', 'width', 'weight', 'count', 'time'].forEach((k) => {
+        const n = cleanNumber(d[k]);
+        if (n !== undefined) data[k] = n;
+    });
+    ['group', 'type', 'shape'].forEach((k) => {
+        const v = cleanString(d[k], 200);
+        if (v !== undefined) data[k] = v;
+    });
+    const out = { data };
+    if (kind === 'nodes' && el.position) {
+        const x = cleanNumber(el.position.x);
+        const y = cleanNumber(el.position.y);
+        if (x !== undefined && y !== undefined) out.position = { x, y };
+    }
+    const classes = cleanClasses(el.classes);
+    if (classes) out.classes = classes;
+    return out;
+}
+
+/**
+ * Reduce a saved Cytoscape graph to data the visualization understands: element ids,
+ * labels, safe colours, numbers, positions and known classes. Stylesheets, URLs
+ * (e.g. background-image), scripts and unknown properties are dropped, so a crafted
+ * saved graph cannot make the viewer's browser load external resources.
+ */
+export function sanitizeGraph(graph) {
+    const elements = graph && graph.elements ? graph.elements : {};
+    let nodes = [];
+    let edges = [];
+    if (Array.isArray(elements)) {
+        elements.forEach((el) => {
+            if (el && el.group === 'edges') edges.push(el);
+            else if (el && el.data && el.data.source !== undefined && el.data.target !== undefined) edges.push(el);
+            else nodes.push(el);
+        });
+    } else {
+        nodes = elements.nodes || [];
+        edges = elements.edges || [];
+    }
+    const cleanNodes = nodes.map((n) => cleanElement(n, 'nodes')).filter(Boolean);
+    const ids = new Set(cleanNodes.map((n) => n.data.id));
+    const cleanEdges = edges.map((e) => cleanElement(e, 'edges'))
+        .filter((e) => e && ids.has(e.data.source) && ids.has(e.data.target));
+    const out = { elements: { nodes: cleanNodes, edges: cleanEdges } };
+    const zoom = cleanNumber(graph && graph.zoom);
+    if (zoom !== undefined && zoom > 0) out.zoom = zoom;
+    if (graph && graph.pan) {
+        const x = cleanNumber(graph.pan.x);
+        const y = cleanNumber(graph.pan.y);
+        if (x !== undefined && y !== undefined) out.pan = { x, y };
+    }
+    return out;
+}
+
+/** Escape a value for use inside a double-quoted SPL string. */
+export function escapeSplValue(value) {
+    return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+/**
+ * Build the "Expand node" search. The node name is always added as an escaped,
+ * double-quoted search term (never pasted raw into SPL):
+ *   base  "index=fw sourcetype=fw"      -> search index=fw sourcetype=fw "<node>" <stats>
+ *   base  "| inputlookup x | search"    -> | inputlookup x | search "<node>" <stats>
+ * stats defaults to "| stats count by src dest" style output supplied by the caller.
+ */
+export function buildExpandSearch(base, stats, nodeName) {
+    const b = String(base || '').trim();
+    if (!b) throw new Error('No "Expand base search" is configured');
+    const term = `"${escapeSplValue(nodeName)}"`;
+    const tail = String(stats || '').trim();
+    const head = b.startsWith('|') ? b : `search ${b}`;
+    return `${head} ${term}${tail ? ' ' + (tail.startsWith('|') ? tail : '| ' + tail) : ''}`;
+}
+
+/** Positions for n new nodes on a circle around an anchor position. */
+export function ringPositions(anchor, n, radius = 160) {
+    const out = [];
+    for (let i = 0; i < n; i++) {
+        const a = (2 * Math.PI * i) / Math.max(n, 1);
+        out.push({ x: Math.round(anchor.x + radius * Math.cos(a)) || 0, y: Math.round(anchor.y + radius * Math.sin(a)) || 0 });
+    }
+    return out;
+}
+
+/** Edge widths (px) from counts, square-root scaled to [minW, maxW]; null for "fixed". */
+export function edgeWidths(counts, mode, minW = 2, maxW = 14) {
+    if (mode !== 'count') return null;
+    const values = counts.map((c) => {
+        const n = parseFloat(c);
+        return Number.isFinite(n) ? n : 1;
+    });
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    return values.map((v) => scaleSize(v, min, max, minW, maxW));
+}
+
+export const NODE_SHAPES = ['ellipse', 'round-rectangle', 'triangle', 'diamond', 'hexagon', 'star', 'vee', 'pentagon', 'octagon', 'rhomboid'];
+// Legend symbols matching NODE_SHAPES.
+export const SHAPE_SYMBOLS = ['●', '▢', '▲', '◆', '⬢', '★', '⌄', '⬟', '⯃', '▱'];
+
+/** Ordinal shape scale for node types: returns (type) => {shape, symbol}. */
+export function shapeScale() {
+    const assigned = new Map();
+    return (type) => {
+        const k = String(type);
+        if (!assigned.has(k)) {
+            const i = assigned.size % NODE_SHAPES.length;
+            assigned.set(k, { shape: NODE_SHAPES[i], symbol: SHAPE_SYMBOLS[i] });
+        }
+        return assigned.get(k);
+    };
+}
+
+/** Parse a Splunk _time value (epoch seconds, or an ISO-8601 string) to epoch milliseconds, or NaN. */
+export function parseTime(value) {
+    if (value === undefined || value === null || value === '') return NaN;
+    const s = String(value).trim();
+    if (/^\d+(\.\d+)?$/.test(s)) return parseFloat(s) * 1000;
+    const t = Date.parse(s);
+    return Number.isFinite(t) ? t : NaN;
+}
+
+/** Sorted unique times for the timeline slider (at most maxSteps, evenly sampled). */
+export function timelineSteps(times, maxSteps = 200) {
+    const unique = Array.from(new Set(times.filter(Number.isFinite))).sort((a, b) => a - b);
+    if (unique.length <= maxSteps) return unique;
+    const out = [];
+    for (let i = 0; i < maxSteps; i++) out.push(unique[Math.round((i * (unique.length - 1)) / (maxSteps - 1))]);
+    return Array.from(new Set(out));
+}
+
+/** Fields that are part of the graph model; others on a row are shown in tooltips. */
+export const RESERVED_FIELDS = ['count', 'line_label', 'line_color', 'line_colour', 'filter_start', 'filter_end', 'remove',
+    'src_group', 'dest_group', 'src_color', 'dest_color', 'src_colour', 'dest_colour', 'src_type', 'dest_type', '_time'];
+
+/** Extra fields of a row (beyond source/target and reserved fields) for tooltips. */
+export function extraFields(fields, row, limit = 8) {
+    const out = [];
+    fields.forEach((f, i) => {
+        const name = String(f && f.name !== undefined ? f.name : f);
+        if (i < 2 || RESERVED_FIELDS.includes(name.toLowerCase()) || name.startsWith('_')) return;
+        const v = row[i];
+        if (v === undefined || v === null || v === '') return;
+        if (out.length < limit) out.push([name, String(v)]);
+    });
+    return out;
 }

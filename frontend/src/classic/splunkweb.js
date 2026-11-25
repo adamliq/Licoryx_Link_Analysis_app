@@ -2,6 +2,8 @@
  * Splunk Web helpers for code running in the Splunk Web page itself (classic viz and
  * the Manage Saved Graphs dashboard): calls to splunkd with the viewer's own session.
  */
+import { buildExpandSearch } from '../core/util.js';
+
 export const APP = 'licoryx_link_analysis_app';
 export const COLLECTION = 'cyto_graphs';
 
@@ -80,4 +82,49 @@ export function makeId() {
     const bytes = new Uint8Array(20);
     crypto.getRandomValues(bytes);
     return Array.from(bytes, (b) => chars[b % chars.length]).join('');
+}
+
+/** POST a form to splunkd (e.g. search jobs). */
+export function splunkdForm(path, form) {
+    const url = `${webPrefix()}/splunkd/__raw${path}`;
+    const body = new URLSearchParams({ output_mode: 'json', ...form });
+    return fetch(url, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+            'X-Requested-With': 'XMLHttpRequest',
+            'X-Splunk-Form-Key': csrfToken(),
+            'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body,
+    }).then((res) => res.text().then((text) => {
+        let parsed = null;
+        try { parsed = text ? JSON.parse(text) : null; } catch (e) { /* not JSON */ }
+        if (res.ok) return parsed;
+        let message = `HTTP ${res.status}`;
+        if (parsed && parsed.messages && parsed.messages[0]) message += `: ${parsed.messages[0].text}`;
+        throw new Error(message);
+    }));
+}
+
+/**
+ * Run the "Expand node" search (one-shot, with the viewer's permissions) and return
+ * {fields:[{name}], rows:[[...]]} in the same shape as visualization data.
+ */
+export function runExpandSearch(base, stats, nodeName, earliest, latest) {
+    const search = buildExpandSearch(base, stats || '| stats count by src_ip dest_ip', nodeName);
+    return splunkdForm(`/servicesNS/-/${APP}/search/jobs`, {
+        search,
+        exec_mode: 'oneshot',
+        earliest_time: earliest || '-24h@h',
+        latest_time: latest || 'now',
+        count: '10000',
+    }).then((body) => {
+        const results = (body && body.results) || [];
+        let names = (body && body.fields ? body.fields.map((f) => (typeof f === 'string' ? f : f.name)) : null);
+        if (!names || !names.length) names = results.length ? Object.keys(results[0]) : [];
+        names = names.filter((n) => !n.startsWith('_') || n === '_time');
+        const rows = results.map((r) => names.map((n) => (Array.isArray(r[n]) ? r[n].join(', ') : r[n])));
+        return { fields: names.map((name) => ({ name })), rows, search };
+    });
 }

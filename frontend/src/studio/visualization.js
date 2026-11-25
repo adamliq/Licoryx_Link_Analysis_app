@@ -9,6 +9,8 @@
 import { VisualizationAPI } from '@splunk/dashboard-studio-extension';
 import cytoscape from 'cytoscape';
 import createLinkAnalysisClass from '../core/link_analysis_core.js';
+import { sanitizeGraph } from '../core/util.js';
+import { savedGraphStyle } from '../core/extras.js';
 import '../core/core.css';
 import './visualization.css';
 
@@ -22,6 +24,8 @@ const DEFAULT_OPTIONS = {
     maxRows: 10000,
     nodeSize: 'fixed',
     largeGraphNodes: 2000,
+    edgeWidth: 'fixed',
+    renderer: 'canvas',
 };
 
 let currentTheme = 'light';
@@ -94,7 +98,35 @@ SplunkVisualizationBase.FIELD_VALUE_DRILLDOWN = 'fieldvalue';
 
 // Studio runs the viz in a sandboxed frame without access to splunkd, so Save
 // State offers the HTTP Event Collector only (no KV store option).
-const LinkAnalysisViz = createLinkAnalysisClass(SplunkVisualizationBase, SplunkVisualizationUtils, { kvstore: false });
+// "Expand" (node menu): ask the dashboard for neighbours via a drilldown event; a dashboard
+// that binds an "expand" data source (filtered by that token) sends the rows back, and
+// they are merged into the graph (see addDataSourcesListener below).
+let expandRequested = false;
+let lastExpandRows = null; // last results of the "expand" data source
+const LinkAnalysisViz = createLinkAnalysisClass(SplunkVisualizationBase, SplunkVisualizationUtils, {
+    kvstore: false,
+    requestExpand(label) {
+        // If the dashboard already returned results for this node (the token did not change,
+        // so the search will not run again), merge those straight away.
+        if (lastExpandRows && lastExpandRows.rows.some((r) => r[0] === label || r[1] === label)) {
+            expandRequested = false;
+            setTimeout(() => viz.expandWith(lastExpandRows), 0);
+            return;
+        }
+        expandRequested = true;
+        VisualizationAPI.triggerDrilldown({ action: 'custom.click', payload: { name: 'expand', value: label } });
+        // Searches can take a while; give up (with a hint) only if nothing came back in 30s.
+        setTimeout(() => {
+            if (expandRequested) {
+                expandRequested = false;
+                showMessage('');
+                VisualizationAPI.setError(`No results came back for expanding "${label}". The dashboard needs an "expand" data source and its Expand inputs filled in (see README: Expand nodes).`);
+                setTimeout(() => VisualizationAPI.clearError(), 6000);
+            }
+        }, 30000);
+    },
+});
+let lastExpandKey = null;
 
 // ---------------------------------------------------------------------------
 // Rendering
@@ -170,15 +202,11 @@ function renderSavedState(graph) {
     container.style.display = 'none';
     savedContainer.style.display = 'block';
     if (savedCy) savedCy.destroy();
-    savedCy = cytoscape({ container: savedContainer });
-    savedCy.json(graph);
     const dark = currentBackground ? isDark(currentBackground) : currentTheme === 'dark';
-    const bg = currentBackground || (dark ? '#212527' : '#ffffff');
-    const fg = dark ? '#ffffff' : '#000000';
-    savedCy.style().selector('core').style({ background: bg });
-    savedCy.style().selector('edge').style({ color: fg, 'text-background-color': bg });
-    savedCy.style().selector('node').style({ color: fg }).update();
-    savedCy.layout({ name: 'preset' }).run();
+    // Saved graphs are user-supplied data: keep only elements, positions and safe values,
+    // and style them with the app's own stylesheet (no saved styles or URLs).
+    const safe = sanitizeGraph(graph);
+    savedCy = cytoscape({ container: savedContainer, style: savedGraphStyle(dark, currentBackground), elements: safe.elements, layout: { name: 'preset' } });
     savedCy.fit(undefined, 20);
 }
 
@@ -279,6 +307,24 @@ VisualizationAPI.addDataSourcesListener(
         const data = dataSources && dataSources.primary && dataSources.primary.data;
         if (data) state.data = data;
         else if (!loading) state.data = null;
+        // Optional "expand" data source: merge new rows into the current graph.
+        const expand = dataSources && dataSources.expand;
+        if (expand && expand.data && !loading) {
+            const key = JSON.stringify(expand.data);
+            if (key !== lastExpandKey) {
+                lastExpandKey = key;
+                const rows = toRowMajor(expand.data);
+                // Studio may first deliver an empty frame (no fields/columns yet) before the
+                // rows; only results with rows answer a pending expand request.
+                if (rows.rows.length) {
+                    lastExpandRows = rows;
+                    if (expandRequested) {
+                        expandRequested = false;
+                        viz.expandWith(rows);
+                    }
+                }
+            }
+        }
         scheduleRender();
     },
     { invokeImmediately: true }

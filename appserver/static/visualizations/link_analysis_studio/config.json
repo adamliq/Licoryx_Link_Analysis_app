@@ -16,7 +16,9 @@
       "requiredDataSources": [
         "primary"
       ],
-      "optionalDataSources": []
+      "optionalDataSources": [
+        "expand"
+      ]
     },
     "size": {
       "initialWidth": 800,
@@ -50,6 +52,14 @@
       "largeGraphNodes": {
         "type": "number",
         "default": 2000
+      },
+      "edgeWidth": {
+        "type": "string",
+        "default": "fixed"
+      },
+      "renderer": {
+        "type": "string",
+        "default": "canvas"
       }
     },
     "editorConfig": [
@@ -169,6 +179,14 @@
                   {
                     "label": "By total count",
                     "value": "count"
+                  },
+                  {
+                    "label": "By PageRank",
+                    "value": "pagerank"
+                  },
+                  {
+                    "label": "By betweenness",
+                    "value": "betweenness"
                   }
                 ]
               }
@@ -179,6 +197,44 @@
               "label": "Large graph threshold (nodes; slow layouts switch to grid above this)",
               "editor": "editor.number",
               "option": "largeGraphNodes"
+            }
+          ],
+          [
+            {
+              "label": "Edge width",
+              "editor": "editor.select",
+              "option": "edgeWidth",
+              "editorProps": {
+                "values": [
+                  {
+                    "label": "Fixed",
+                    "value": "fixed"
+                  },
+                  {
+                    "label": "By count",
+                    "value": "count"
+                  }
+                ]
+              }
+            }
+          ],
+          [
+            {
+              "label": "Renderer (WebGL is experimental, for very large graphs)",
+              "editor": "editor.select",
+              "option": "renderer",
+              "editorProps": {
+                "values": [
+                  {
+                    "label": "Canvas",
+                    "value": "canvas"
+                  },
+                  {
+                    "label": "WebGL (experimental)",
+                    "value": "webgl"
+                  }
+                ]
+              }
             }
           ]
         ]

@@ -15,7 +15,12 @@ import Modal from './Modal.js';
 import {
   DEFAULT_LARGE_GRAPH_NODES, MAX_ROWS_LIMIT, countByKey, detectColumns, drilldownData, isDarkColor,
   matchNodeName, menuColors, nodeAttributes, nodeSizes, ordinalColor, parseMaxRows, parsePositiveInt, planLayout,
+  sanitizeGraph, shapeScale, edgeWidths, extraFields, parseTime, ringPositions, isSafeColor,
 } from './util.js';
+import {
+  attachTooltip, createToolbar, createTimeline, applyPageRank, applyBetweenness, applyClusters, filterByDegree,
+  filterNeighbourhood, clearFilters, graphPng, downloadDataUrl, applyFeatureStyles,
+} from './extras.js';
 import coseBilkent from 'cytoscape-cose-bilkent';
 import dblclick from 'cytoscape-dblclick';
 
@@ -152,6 +157,11 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
           }
 
         },
+        // Raw property (used for search text, which must not be HTML-escaped; never put into HTML)
+        _getRawProperty: function (name, config) {
+          var v = config[this.getPropertyNamespaceInfo().propertyNamespace + name];
+          return v === undefined || v === null ? '' : String(v);
+        },
         // Escape properties that are passed as configuration items
         _getEscapedProperty: function (name, config) {
           var propertyValue = config[this.getPropertyNamespaceInfo().propertyNamespace + name];
@@ -185,6 +195,18 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
 
               case "display.visualizations.custom.licoryx_link_analysis_app.link_analysis.largeGraphNodes":
                 this.largeGraphNodes = parsePositiveInt(this._getEscapedProperty('largeGraphNodes', config), DEFAULT_LARGE_GRAPH_NODES);
+            this.edgeWidth = this._getEscapedProperty('edgeWidth', config) || 'fixed';
+            this.renderer = this._getEscapedProperty('renderer', config) || 'canvas';
+            this.expandBase = this._getRawProperty('expandBase', config) || '';
+            this.expandStats = this._getRawProperty('expandStats', config) || '';
+            this.expandEarliest = this._getRawProperty('expandEarliest', config) || '-24h@h';
+            this.expandLatest = this._getRawProperty('expandLatest', config) || 'now';
+                this.edgeWidth = this._getEscapedProperty('edgeWidth', config) || 'fixed';
+                this.renderer = this._getEscapedProperty('renderer', config) || 'canvas';
+                this.expandBase = this._getRawProperty('expandBase', config) || '';
+                this.expandStats = this._getRawProperty('expandStats', config) || '';
+                this.expandEarliest = this._getRawProperty('expandEarliest', config) || '-24h@h';
+                this.expandLatest = this._getRawProperty('expandLatest', config) || 'now';
                 break;
 
               default:
@@ -201,6 +223,12 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
                 this.maxRows = parseMaxRows(this._getEscapedProperty('maxRows', config));
                 this.nodeSize = this._getEscapedProperty('nodeSize', config) || 'fixed';
                 this.largeGraphNodes = parsePositiveInt(this._getEscapedProperty('largeGraphNodes', config), DEFAULT_LARGE_GRAPH_NODES);
+            this.edgeWidth = this._getEscapedProperty('edgeWidth', config) || 'fixed';
+            this.renderer = this._getEscapedProperty('renderer', config) || 'canvas';
+            this.expandBase = this._getRawProperty('expandBase', config) || '';
+            this.expandStats = this._getRawProperty('expandStats', config) || '';
+            this.expandEarliest = this._getRawProperty('expandEarliest', config) || '-24h@h';
+            this.expandLatest = this._getRawProperty('expandLatest', config) || 'now';
 
 
                 break;
@@ -220,6 +248,12 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
             this.maxRows = parseMaxRows(this._getEscapedProperty('maxRows', config));
             this.nodeSize = this._getEscapedProperty('nodeSize', config) || 'fixed';
             this.largeGraphNodes = parsePositiveInt(this._getEscapedProperty('largeGraphNodes', config), DEFAULT_LARGE_GRAPH_NODES);
+            this.edgeWidth = this._getEscapedProperty('edgeWidth', config) || 'fixed';
+            this.renderer = this._getEscapedProperty('renderer', config) || 'canvas';
+            this.expandBase = this._getRawProperty('expandBase', config) || '';
+            this.expandStats = this._getRawProperty('expandStats', config) || '';
+            this.expandEarliest = this._getRawProperty('expandEarliest', config) || '-24h@h';
+            this.expandLatest = this._getRawProperty('expandLatest', config) || 'now';
 
 
             return;
@@ -483,6 +517,8 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
           }
           var cy = cytoscape({
             container: document.getElementById(CY_ID),
+            // Optional WebGL rendering (experimental in Cytoscape) for very large graphs.
+            renderer: this.renderer === 'webgl' ? { name: 'canvas', webgl: true } : { name: 'canvas' },
             style: [{
               selector: 'node',
               style: {
@@ -544,6 +580,8 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
           var nodeAttrs = this.nodeAttrs || new Map();
           var sizes = nodeSizes(nodeAttrs, this.nodeSize);
           var legend = new Map();
+          var typeLegend = new Map();
+          var shapeOf = shapeScale();
           nodesUnique.forEach(function (node) {
             // Create an incrementer for the node id
             node_id = "n" + n;
@@ -565,12 +603,23 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
               color: node_color
             };
             if (sizes && sizes.has(node)) nodeData.size = sizes.get(node);
+            if (attrs.weight !== undefined) nodeData.weight_total = attrs.weight;
+            if (attrs.group !== null && attrs.group !== undefined) nodeData.group = String(attrs.group);
+            if (attrs.type !== null && attrs.type !== undefined) {
+              var shape = shapeOf(attrs.type);
+              nodeData.type = String(attrs.type);
+              nodeData.shape = shape.shape;
+              typeLegend.set(String(attrs.type), shape.symbol);
+            }
             cy.add({ data: nodeData });
             n++;
           });
-          this._renderLegend(legend);
+          this._renderLegend(legend, typeLegend);
 
-          datum.forEach(function (link) {
+          var edgeColumns = this.columns || {};
+          var widths = edgeWidths(datum.map(function (r) { return edgeColumns.count >= 0 ? r[edgeColumns.count] : 1; }), this.edgeWidth);
+          var rowFields = data.fields;
+          datum.forEach(function (link, rowIndex) {
             // Add nodes to list
             source_out = nodesByName[link[0]].id
             target_out = nodesByName[link[1]].id
@@ -584,7 +633,16 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
               line_label_num = this.format_info['line_label']
               node_data.data.label = link[line_label_num]
             }
-            node_data.data.color = this.format_info['line_color'] ? node_data.data.color = link[this.format_info['line_color']] : "#808080"
+            var lineColor = this.format_info['line_color'] !== undefined ? link[this.format_info['line_color']] : null;
+            node_data.data.color = lineColor && isSafeColor(lineColor) ? lineColor : "#808080";
+            if (edgeColumns.count >= 0) node_data.data.count = link[edgeColumns.count];
+            if (widths) node_data.data.width = widths[rowIndex];
+            if (edgeColumns.time >= 0) {
+              var t = parseTime(link[edgeColumns.time]);
+              if (Number.isFinite(t)) node_data.data.time = t;
+            }
+            var extra = extraFields(rowFields, link);
+            if (extra.length) node_data.data.extra = extra;
 
             cy.add(node_data)
 
@@ -712,6 +770,11 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
 
           // End Styling
 
+          // Styles for filters, timeline, shapes and edge widths; analytics-based node sizes.
+          applyFeatureStyles(cy);
+          if (this.nodeSize === 'pagerank') applyPageRank(cy);
+          if (this.nodeSize === 'betweenness') applyBetweenness(cy, this.directed);
+
           // "Laying out..." indicator: shown now, hidden in launchPostProcess() when the layout
           // stops. The layout starts on the next tick so the browser can paint the indicator.
           var self = this;
@@ -721,6 +784,7 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
             if (self._cy !== cy) return; // a newer render replaced this graph
             runLayout(plan.layout);
           }, 30);
+          this._shownRows = data.rows.length;
           this._renderNotices(data.rows.length, this._notices);
 
           // Run Layout function
@@ -940,6 +1004,16 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
                 : { kind: 'edge', source: target.source().data('label'), target: target.target().data('label') });
               self.drilldownTo(data, e.originalEvent);
             });
+            // Hover details, timeline (when edges have _time) and the toolbar.
+            attachTooltip(cy, vizEl);
+            if (self._stopTimeline) self._stopTimeline();
+            self._stopTimeline = createTimeline(cy, vizEl);
+            createToolbar(vizEl, [
+              { id: 'search', label: 'Search', title: 'Search nodes', handler: openSearchDialog },
+              { id: 'menu', label: 'Menu', title: 'More actions', handler: function () { openMenuDialog(cy); } },
+              { id: 'fit', label: 'Fit', title: 'Fit the graph to the panel', handler: function () { cy.fit(undefined, 30); } },
+              { id: 'save', label: 'Save', title: 'Save State', handler: openSaveStateDialog }
+            ]);
             let boxedNodes = cy.collection();
             let elemsWChildren = cy.collection();
             if (preRemove) {
@@ -981,7 +1055,8 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
 
             var menuDataList = document.createElement("datalist");
             menuDataList.setAttribute("id", MENU_LIST_ID);
-            menu_list_items = ['Delete Highlighted Items', 'Delete Non-Highlighted Items', 'Refresh', 'Clear Formatting', 'Save State', 'Style Edges', 'Export Graph JSON'];
+            menu_list_items = ['Delete Highlighted Items', 'Delete Non-Highlighted Items', 'Refresh', 'Clear Formatting', 'Save State', 'Style Edges', 'Export Graph JSON',
+              'Export Image (PNG)', 'Size by PageRank', 'Size by Betweenness', 'Find Clusters', 'Filter by Connections', 'Clear Filters'];
             menu_list_items = menu_list_items.sort()
             menu_list_items.forEach(function (item) {
               var option = document.createElement('option');
@@ -1002,6 +1077,18 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
             cy.cxtmenu(Object.assign({}, cxtColors, {
               selector: 'node',
               commands: [{
+                  content: 'Expand',
+                  select: function (ele) { expandNode(ele); },
+                },
+                {
+                  content: 'Neighbours',
+                  select: function (ele) {
+                    var shown = filterNeighbourhood(cy, ele, 2);
+                    self._notices = ['Showing the 2-hop neighbourhood of "' + ele.data('label') + '" (' + shown + ' nodes). Menu > Clear Filters shows everything again.'];
+                    self._renderNotices(self._shownRows, self._notices);
+                  },
+                },
+                {
                   content: "Single Path Select",
                   select: function (ele) {
                     if (start) {
@@ -1207,75 +1294,12 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
               selector: 'core',
               commands: [{
                   content: 'Search Nodes',
-                  select: function () {
-                    // Now we initialize the Modal itself
-                    var myModal = new Modal("modal1", {
-                      title: "Search Nodes",
-                      backdrop: 'static',
-                      keyboard: false,
-                      destroyOnHide: true,
-                      type: 'normal'
-                    });
-                    myModal.body
-                      .append($('<p>Use the search menu to find and zoom into a node.</p>'));
-
-                    myModal.body
-                      .append($('<input>').attr({
-                        'name': 'node_search',
-                        'id': 'node_search',
-                        'type': 'text',
-                        'list': NODE_LIST_ID,
-                        'style': 'z-index:9999'
-                      }));
-
-                    myModal.footer.append($('<button>').attr({
-                      type: 'button',
-                      'data-dismiss': 'modal'
-                    }).addClass('btn btn-primary').text('Search').on('click', function () {
-                      // Do Nothing Function
-                      searchNodes();
-
-                    }))
-                    myModal.show(); // Launch it!
-                  },
+                  select: function () { openSearchDialog(); },
                 },
-
                 {
                   content: 'Menu',
-                  select: function (ele) {
-                    // Now we initialize the Modal itself
-                    var myModal = new Modal("modal1", {
-                      title: "Menu",
-                      backdrop: 'static',
-                      keyboard: false,
-                      destroyOnHide: true,
-                      type: 'normal'
-                    });
-                    myModal.body
-                      .append($('<p>Select from the list of available functions.</p>'));
-
-                    myModal.body
-                      .append($('<input>').attr({
-                        'name': 'menu_select',
-                        'id': 'menu_select',
-                        'type': 'text',
-                        'list': MENU_LIST_ID,
-                        'style': 'z-index:9999'
-                      }).addClass('table table-striped table-hover'));
-
-                    myModal.footer.append($('<button>').attr({
-                      type: 'button',
-                      'data-dismiss': 'modal'
-                    }).addClass('btn btn-primary').text('Select').on('click', function () {
-                      // Do Nothing Function
-                      x = document.getElementById('menu_select')
-                      returnMenu(ele, x);
-
-                    }))
-                    myModal.show(); // Launch it!
-                  },
+                  select: function (ele) { openMenuDialog(ele); },
                 },
-
               ]
             }));
 
@@ -1463,6 +1487,171 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
             return nodesByName[name].id || (nodesByName[name].id = node_id);
           }
 
+          // ---- Dialogs shared by the context menus and the toolbar ----
+
+          function openSearchDialog() {
+            var searchModal = new Modal("modal1", {
+              title: "Search Nodes",
+              backdrop: 'static',
+              keyboard: true,
+              destroyOnHide: true,
+              type: 'normal'
+            });
+            searchModal.body.append($('<p>').text('Find a node (exact, case-insensitive or partial match) and zoom to it.'));
+            var input = $('<input>').attr({ name: 'node_search', id: 'node_search', type: 'text', list: NODE_LIST_ID });
+            input.on('keydown', function (e) {
+              if (e.key === 'Enter') { searchNodes(); searchModal.hide(); }
+            });
+            searchModal.body.append(input);
+            searchModal.footer.append($('<button>').attr({
+              type: 'button',
+              'data-dismiss': 'modal'
+            }).addClass('btn btn-primary').text('Search').on('click', function () {
+              searchNodes();
+            }));
+            searchModal.show();
+          }
+
+          function openMenuDialog(ele) {
+            var menuModal = new Modal("modal1", {
+              title: "Menu",
+              backdrop: 'static',
+              keyboard: true,
+              destroyOnHide: true,
+              type: 'normal'
+            });
+            menuModal.body.append($('<p>').text('Select from the list of available functions.'));
+            var input = $('<input>').attr({ name: 'menu_select', id: 'menu_select', type: 'text', list: MENU_LIST_ID });
+            menuModal.body.append(input);
+            menuModal.footer.append($('<button>').attr({
+              type: 'button',
+              'data-dismiss': 'modal'
+            }).addClass('btn btn-primary').text('Select').on('click', function () {
+              returnMenu(ele, document.getElementById('menu_select'));
+            }));
+            menuModal.show();
+          }
+
+          function setNotice(text) {
+            self._notices = text ? [text] : [];
+            self._renderNotices(self._shownRows, self._notices);
+          }
+
+          function openFilterDialog() {
+            var filterModal = new Modal("modal1", {
+              title: "Filter by Connections",
+              backdrop: 'static',
+              keyboard: true,
+              destroyOnHide: true,
+              type: 'normal'
+            });
+            filterModal.body.append($('<p>').text('Hide nodes with fewer connections than:'));
+            var input = $('<input type="text" id="lla_min_degree" name="lla_min_degree">').val('2');
+            filterModal.body.append(input);
+            filterModal.footer.append($('<button>').attr({
+              type: 'button',
+              'data-dismiss': 'modal'
+            }).addClass('btn btn-primary').text('Apply').on('click', function () {
+              var min = parsePositiveInt(input.val(), 1);
+              var hidden = filterByDegree(cy, min);
+              setNotice(hidden + ' nodes with fewer than ' + min + ' connections are hidden. Menu > Clear Filters shows them again.');
+            }));
+            filterModal.show();
+          }
+
+          function exportImage() {
+            var png = graphPng(cy, bgColor || '#ffffff');
+            downloadDataUrl(png, 'link-analysis.png');
+            // Also show it: downloads are blocked inside Dashboard Studio's sandboxed frame.
+            var imageModal = new Modal("modal1", {
+              title: "Export Image (PNG)",
+              backdrop: 'static',
+              keyboard: true,
+              destroyOnHide: true,
+              type: 'normal'
+            });
+            imageModal.body.append($('<p>').text('If the download did not start, right-click the image and choose "Save image as".'));
+            imageModal.body.append($('<img class="lla-export-image" id="lla_export_image" alt="Link analysis graph">').attr('src', png));
+            imageModal.footer.append($('<button>').attr({
+              type: 'button',
+              'data-dismiss': 'modal'
+            }).addClass('btn btn-primary').text('Close'));
+            imageModal.show();
+          }
+
+          // ---- Expand a node: add the results of a follow-up search around it ----
+
+          var expandCounter = 0;
+          function expandNode(ele) {
+            var label = ele.data('label');
+            if (features.runSearch) {
+              if (!self.expandBase) {
+                showStatus('Expand', 'Set "Expand base search" in the visualization options (Format menu) to expand nodes, ' +
+                  'e.g. index=firewall sourcetype=fw. The node name is added as a quoted search term.');
+                return;
+              }
+              setNotice('Expanding "' + label + '"...');
+              Promise.resolve()
+                .then(function () { return features.runSearch(self.expandBase, self.expandStats, label, self.expandEarliest, self.expandLatest); })
+                .then(function (result) { addExpansion(result, ele); })
+                .catch(function (err) { setNotice(null); showStatus('Expand failed', err && err.message ? err.message : String(err)); });
+            } else if (features.requestExpand) {
+              setNotice('Expanding "' + label + '"...');
+              self._expandAnchor = ele.id();
+              features.requestExpand(label);
+            } else {
+              showStatus('Expand', 'Expanding nodes is not available here.');
+            }
+          }
+
+          // Merge rows ({fields, rows}) into the graph: new nodes go on a ring around the anchor.
+          function addExpansion(result, anchor) {
+            var rows = (result && result.rows) || [];
+            var fields = (result && result.fields) || [];
+            if (!anchor || anchor.removed()) anchor = cy.nodes().first();
+            var cols = detectColumns(fields);
+            var attrs = nodeAttributes(rows, cols);
+            var newNames = [];
+            rows.forEach(function (r) {
+              [r[0], r[1]].forEach(function (name) {
+                if (name === undefined || name === null || name === '') return;
+                if (!nodesByName[name] && newNames.indexOf(name) === -1) newNames.push(name);
+              });
+            });
+            var positions = ringPositions(anchor.position(), newNames.length, 120 + 8 * Math.min(newNames.length, 30));
+            var added = cy.collection();
+            newNames.forEach(function (name, i) {
+              expandCounter += 1;
+              var id = 'x' + expandCounter;
+              nodesByName[name] = { name: name, group: 0, id: id };
+              var a = attrs.get(name) || {};
+              var c = a.color || (a.group !== null && a.group !== undefined ? groupColor(a.group) : color('expanded'));
+              added = added.union(cy.add({ group: 'nodes', data: { id: id, weight: 1, label: name, color: c }, position: positions[i] }));
+              var option = document.createElement('option');
+              option.value = name;
+              var list = document.getElementById(NODE_LIST_ID);
+              if (list) list.appendChild(option);
+            });
+            var newEdges = 0;
+            rows.forEach(function (r) {
+              var s1 = nodesByName[r[0]];
+              var t1 = nodesByName[r[1]];
+              if (!s1 || !t1) return;
+              if (cy.edges('[source = "' + s1.id + '"][target = "' + t1.id + '"]').length) return;
+              var edgeData = { source: s1.id, target: t1.id, color: '#808080' };
+              if (cols.count >= 0) edgeData.count = r[cols.count];
+              cy.add({ group: 'edges', data: edgeData });
+              newEdges += 1;
+            });
+            if (added.length) added.flashClass('nodehighlighted', 2500);
+            setNotice('Expanded "' + anchor.data('label') + '": ' + newNames.length + ' new nodes, ' + newEdges + ' new edges.');
+            return { nodes: newNames.length, edges: newEdges };
+          }
+          self._expandApi = { add: function (result) {
+            var anchor = self._expandAnchor ? cy.getElementById(self._expandAnchor) : null;
+            return addExpansion(result, anchor && anchor.length ? anchor : null);
+          } };
+
           function returnMenu(ele, x) {
 
             switch (x.value) {
@@ -1516,6 +1705,39 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
               case "Export Graph JSON":
                 deleteElement('menu_select')
                 openExportDialog();
+                break;
+
+              case "Export Image (PNG)":
+                deleteElement('menu_select')
+                exportImage();
+                break;
+
+              case "Size by PageRank":
+                deleteElement('menu_select')
+                setNotice(applyPageRank(cy));
+                break;
+
+              case "Size by Betweenness":
+                deleteElement('menu_select')
+                setNotice(applyBetweenness(cy, directedGlobal));
+                break;
+
+              case "Find Clusters":
+                deleteElement('menu_select')
+                var clusterLegend = applyClusters(cy);
+                self._renderLegend(clusterLegend, null);
+                setNotice('Nodes are coloured by cluster (Markov clustering): ' + clusterLegend.size + ' clusters.');
+                break;
+
+              case "Filter by Connections":
+                deleteElement('menu_select')
+                openFilterDialog();
+                break;
+
+              case "Clear Filters":
+                deleteElement('menu_select')
+                clearFilters(cy);
+                setNotice(null);
                 break;
 
               case "Remove Nodes by Count":
@@ -1737,7 +1959,7 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
               } else {
                 var http_event_code = document.getElementById("http_event_code").value;
                 var http_destination = document.getElementById("http_destination").value;
-                httpRequest(http_destination, http_event_code, cy.json(), description);
+                httpRequest(http_destination, http_event_code, sanitizeGraph(cy.json()), description);
               }
             }));
             saveModal.show();
@@ -1747,7 +1969,7 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
             var record = {
               graph_id: makeid(),
               description: description,
-              graph_info: JSON.stringify(cy.json()),
+              graph_info: JSON.stringify(sanitizeGraph(cy.json())),
               saved_at: Math.floor(Date.now() / 1000)
             };
             Promise.resolve(features.currentUser ? features.currentUser() : null)
@@ -1777,7 +1999,7 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
               type: 'normal'
             });
             exportModal.body.append($('<p>').text('Copy this JSON (Ctrl/Cmd+A, Ctrl/Cmd+C) and paste it into "Import graph" on the Manage Saved Graphs page to save it in Splunk.'));
-            var area = $('<textarea class="lla-export" id="lla_export_json" readonly rows="12">').val(JSON.stringify(cy.json()));
+            var area = $('<textarea class="lla-export" id="lla_export_json" readonly rows="12">').val(JSON.stringify(sanitizeGraph(cy.json())));
             area.on('focus click', function () { this.select(); });
             exportModal.body.append(area);
             exportModal.footer.append($('<button>').attr({
@@ -1858,9 +2080,9 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
           box.style.display = box.childNodes.length ? 'block' : 'none';
         },
 
-        _renderLegend: function (legend) {
+        _renderLegend: function (legend, typeLegend) {
           var box = this.el.querySelector('.lla-legend');
-          if (!legend || legend.size === 0) {
+          if ((!legend || legend.size === 0) && (!typeLegend || typeLegend.size === 0)) {
             if (box) box.remove();
             return;
           }
@@ -1870,7 +2092,17 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
             this.el.appendChild(box);
           }
           box.textContent = '';
-          legend.forEach(function (color, group) {
+          (typeLegend || new Map()).forEach(function (symbol, type) {
+            var item = document.createElement('div');
+            item.className = 'lla-legend-item lla-legend-type';
+            var glyph = document.createElement('span');
+            glyph.className = 'lla-legend-shape';
+            glyph.textContent = symbol;
+            item.appendChild(glyph);
+            item.appendChild(document.createTextNode(String(type)));
+            box.appendChild(item);
+          });
+          (legend || new Map()).forEach(function (color, group) {
             var item = document.createElement('div');
             item.className = 'lla-legend-item';
             var swatch = document.createElement('span');
@@ -1891,6 +2123,11 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
             this.el.appendChild(el);
           }
           return el;
+        },
+
+        // Merge the results of an "expand" search (Dashboard Studio's optional expand data source).
+        expandWith: function (result) {
+          return this._expandApi ? this._expandApi.add(result) : null;
         },
 
         drilldownTo: function (data, browserEvent) {

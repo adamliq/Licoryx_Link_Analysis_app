@@ -3,6 +3,7 @@
 .gitignore export-ignore
 package.sh export-ignore
 dist/ export-ignore
+docs/ export-ignore
 frontend/ export-ignore
 tests/ export-ignore
 .github/ export-ignore

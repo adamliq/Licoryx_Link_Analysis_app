@@ -5,8 +5,64 @@
  * Uses the viewer's own Splunk Web session; KV store permissions apply.
  */
 import { APP, checkKvStore, currentUser, graphs, makeId, webPrefix } from '../classic/splunkweb.js';
-import { parseGraphJson } from '../core/util.js';
+import { parseGraphJson, sanitizeGraph } from '../core/util.js';
+import Modal from '../core/Modal.js';
+import '../core/core.css';
 import './manage_graphs.css';
+
+// In-page dialogs (instead of window.prompt / window.confirm).
+function promptDialog(title, label, value) {
+    return new Promise((resolve) => {
+        const m = new Modal('llm-dialog', { title, keyboard: true, destroyOnHide: true });
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.id = 'llm-dialog-input';
+        input.value = value || '';
+        const p = document.createElement('p');
+        p.textContent = label;
+        m.body.append(p, input);
+        let done = false;
+        const finish = (v) => { if (!done) { done = true; resolve(v); } };
+        const ok = document.createElement('button');
+        ok.type = 'button';
+        ok.className = 'btn btn-primary';
+        ok.id = 'llm-dialog-ok';
+        ok.textContent = 'Save';
+        ok.setAttribute('data-dismiss', 'modal');
+        ok.addEventListener('click', () => finish(input.value));
+        input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { finish(input.value); m.hide(); } });
+        m.footer.append(ok);
+        m.$el.on('hide', () => finish(null));
+        m.show();
+    });
+}
+
+function confirmDialog(title, text, actionLabel) {
+    return new Promise((resolve) => {
+        const m = new Modal('llm-dialog', { title, keyboard: true, destroyOnHide: true });
+        const p = document.createElement('p');
+        p.textContent = text;
+        m.body.append(p);
+        let done = false;
+        const finish = (v) => { if (!done) { done = true; resolve(v); } };
+        const cancel = document.createElement('button');
+        cancel.type = 'button';
+        cancel.className = 'btn';
+        cancel.textContent = 'Cancel';
+        cancel.setAttribute('data-dismiss', 'modal');
+        cancel.addEventListener('click', () => finish(false));
+        const ok = document.createElement('button');
+        ok.type = 'button';
+        ok.className = 'btn btn-primary llm-danger';
+        ok.id = 'llm-dialog-ok';
+        ok.textContent = actionLabel;
+        ok.setAttribute('data-dismiss', 'modal');
+        ok.addEventListener('click', () => finish(true));
+        m.footer.append(cancel, ok);
+        m.$el.on('hide', () => finish(false));
+        m.show();
+    });
+}
 
 function el(tag, attrs = {}, ...children) {
     const node = document.createElement(tag);
@@ -62,16 +118,17 @@ function mount(root) {
         }, 'Open');
         const rename = el('button', { type: 'button', class: 'btn btn-small llm-rename' }, 'Rename');
         const del = el('button', { type: 'button', class: 'btn btn-small llm-delete' }, 'Delete');
-        rename.addEventListener('click', () => {
-            const name = window.prompt('New description', g.description || '');
+        rename.addEventListener('click', async () => {
+            const name = await promptDialog('Rename saved graph', 'New description', g.description || '');
             if (name === null) return;
             graphs.get(g._key)
                 .then((full) => graphs.update(g._key, { ...full, description: name }))
                 .then(() => { setStatus(`Renamed to "${name}".`, 'ok'); load(); })
                 .catch((e) => setStatus(`Rename failed: ${e.message}`, 'error'));
         });
-        del.addEventListener('click', () => {
-            if (!window.confirm(`Delete "${g.description || g.graph_id}"? This cannot be undone.`)) return;
+        del.addEventListener('click', async () => {
+            const yes = await confirmDialog('Delete saved graph', `Delete "${g.description || g.graph_id}"? This cannot be undone.`, 'Delete');
+            if (!yes) return;
             graphs.remove(g._key)
                 .then(() => { setStatus(`Deleted "${g.description || g.graph_id}".`, 'ok'); load(); })
                 .catch((e) => setStatus(`Delete failed: ${e.message}`, 'error'));
@@ -105,7 +162,8 @@ function mount(root) {
     importButton.addEventListener('click', () => {
         let graph;
         try {
-            graph = parseGraphJson(importJson.value);
+            // Imported graphs are user-supplied: keep only data the app understands.
+            graph = sanitizeGraph(parseGraphJson(importJson.value));
         } catch (e) {
             setStatus(`Import failed: ${e.message}`, 'error');
             return;
