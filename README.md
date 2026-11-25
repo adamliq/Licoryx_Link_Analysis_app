@@ -1,4 +1,6 @@
 # Licoryx Link Analysis App #
+
+![Link Analysis Explorer](docs/screenshots/01-explorer-studio.png)
 This app provides a seperate visualisation framework for doing force directed visualisation with additional functionality.
 For more about the visualisation framework visit here.
 https://github.com/cytoscape/cytoscape.js
@@ -26,7 +28,7 @@ The app's dashboards:
 - **Link Analysis Historical View** (Dashboard Studio) - pick a graph saved with *Save State* and load it with its saved layout.
 - **Manage Saved Graphs** (Classic) - open, rename, delete and import graphs saved in the KV store; shows who saved each graph and when.
 
-**Requirements:** the Studio visualization and dashboards need Splunk Enterprise 10.4 or later, or a Splunk Cloud Platform version that includes the Dashboard Studio custom visualization framework. On older versions use the Classic visualization from the search page, or stay on app version 2.0.0.
+**Requirements:** the Studio visualization and dashboards need Splunk Enterprise 10.4 or later, or a Splunk Cloud Platform version that includes the Dashboard Studio custom visualization framework. On older versions use the Classic visualization from the search page (and the Classic Manage Saved Graphs page). App packages are attached to the [GitHub Releases](https://github.com/adamliq/Licoryx_Link_Analysis_app/releases); releases before 2.3.0 are in the git history, e.g. [2.0.0](https://github.com/adamliq/Licoryx_Link_Analysis_app/raw/bca9bf77205c6681e361f35d58d04896f622532c/dist/licoryx_link_analysis_app-2.0.0.tgz).
 
 To use the Studio visualization in your own dashboard, add it from the visualization picker (*Licoryx Link Analysis*) or in the source:
 ```json
@@ -36,9 +38,26 @@ To use the Studio visualization in your own dashboard, add it from the visualiza
     "options": { "layoutStyle": "fcose", "pathAlgo": "dijkstra", "directed": false, "recursiveLookup": true, "maxRows": 10000 }
 }
 ```
-Options (also in the editor's *Visualization Style* section): `layoutStyle` (fcose, grid, circle, klay, dagre, concentric, breadthfirst, cose, cose-bilkent), `pathAlgo` (dijkstra, aStar, floydWarshall, bellmanFord), `directed`, `recursiveLookup`, `maxRows` (see *Row limit*), `nodeSize` (`fixed`, `degree` = number of connections, `count` = total of the `count` field) and `largeGraphNodes` (see *Large graphs*). The editor's *Background color* is also honoured; label colours switch to stay readable.
+Options (also in the editor's *Visualization Style* section): `layoutStyle` (fcose, grid, circle, klay, dagre, concentric, breadthfirst, cose, cose-bilkent), `pathAlgo` (dijkstra, aStar, floydWarshall, bellmanFord), `directed`, `recursiveLookup`, `maxRows` (see *Row limit*), `nodeSize` (`fixed`, `degree` = number of connections, `count` = total of the `count` field, `pagerank`, `betweenness`), `edgeWidth` (`fixed`, `count`), `renderer` (`canvas`, `webgl` - experimental, for very large graphs) and `largeGraphNodes` (see *Large graphs*). The editor's *Background color* is also honoured; label colours switch to stay readable.
 
 If a search returns a saved graph (a `graph_info` field from the KV store, or a `_raw` HEC event, as written by *Save State*), the Studio visualization renders it with its saved positions.
+
+### Working with the graph
+- **Toolbar** (bottom right): *Search* nodes, *Menu* (all actions below), *Fit* the graph, *Save* State. Every action is also on the right-click (or press-and-hold) menus.
+- **Hover** a node for its connections, total count, group and type; hover an edge for its count, label, time and the other fields of that row.
+- **Timeline:** if the results have a `_time` column (put it after the source and target columns), a slider at the bottom shows the graph up to a point in time; *Play* animates it.
+- **Node menu:** *Expand*, *Neighbours* (show only the 2-hop neighbourhood), path selection, *Focus*, *Condense*.
+- **Menu:** *Size by PageRank* / *Size by Betweenness*, *Find Clusters* (colours communities, Markov clustering), *Filter by Connections* / *Clear Filters*, *Export Image (PNG)*, *Export Graph JSON*, *Save State*, *Style Edges*, *Refresh*, highlighting tools.
+
+### Expand nodes
+*Expand* (node right-click menu) adds a node's neighbours from a follow-up search, placed around the node, without re-laying out the rest of the graph. The node name is always added as an escaped, quoted search term - it is never pasted raw into SPL.
+- **Classic visualization:** set *Expand base search* in the Format menu's *Expand Nodes* section (e.g. `index=firewall sourcetype=fw`) and *Expand stats* (default `| stats count by src_ip dest_ip`; it must output source, target and optionally count). The search `search <base> "<node>" <stats>` runs with your permissions over *Expand earliest/latest time*. A base starting with `|` gets `| search "<node>"` appended instead.
+- **Dashboard Studio:** the visualization asks the dashboard: bind an optional `expand` data source and set a token from the drilldown, e.g.
+```json
+"dataSources": { "primary": "ds_graph", "expand": "ds_expand" },
+"eventHandlers": [{ "type": "drilldown.setToken", "options": { "tokens": [{ "token": "expand_node", "key": "value" }] } }]
+```
+with `ds_expand` querying `index=firewall $expand_node|s$ | stats count by src_ip dest_ip`. The Link Analysis Explorer has this built in: fill its *Expand base search* input.
 
 ### Drilldown
 Double-click a node or an edge to drill down.
@@ -73,6 +92,8 @@ Up to 10,000 rows are drawn by default. Change it with **Maximum rows** (1-50,00
 - src_group / dest_group - Group of the source / target node. Nodes are coloured by group and a legend is shown.
 ```index=firewall | stats count by src_ip, dest_ip | lookup asset_inventory ip as src_ip OUTPUT category as src_group | lookup asset_inventory ip as dest_ip OUTPUT category as dest_group```
 - src_color / dest_color - Explicit colour of the source / target node (e.g. `#e8304a` or `red`); overrides the group colour.
+- src_type / dest_type - Type of the source / target node (e.g. host, user, domain); each type gets a node shape and appears in the legend.
+- _time - Edge time; adds the timeline slider. Put it after the source and target columns.
 - line_color - To specify a color of an edge
 ```index=firewall action=allowed | stats count by src_ip, dest_ip | eval line_color=if(count>10,"red","green")```
 ***If count is greater than 10 make the line red else make it green.***
@@ -150,6 +171,8 @@ If the KV store is not running, Save State says so and switches to the HTTP Even
 
 The token is typed into a password field and is not stored. The Historical View lists graphs from both the KV store and `index=cyto`.
 
+**Saved graphs are treated as untrusted data.** Anyone who can save graphs could craft one, so saved and imported graphs are reduced to elements, labels, positions, plain colours and numbers before they are stored or drawn; stylesheets, URLs (such as background images) and unknown properties are dropped, and the app applies its own styling.
+
 ### Bugs / Missing Docos
 Please report any bugs to github, Splunk Answers or alternatively hit me up on twitter @MickeyPerre
 
@@ -171,7 +194,7 @@ AppInspect warns that legacy custom visualizations (`framework_type = legacy_vis
 
 ### Development
 Repository layout (only the app files are packaged; `frontend/`, `tests/` and `.github/` are excluded):
-- `frontend/src/core` - shared visualization logic (`link_analysis_core.js`), modal dialogs and styles
+- `frontend/src/core` - shared visualization logic: `link_analysis_core.js` (graph building, layouts, menus, Save State), `extras.js` (hover details, toolbar, timeline, analytics, filters, PNG export, saved-graph styling), `util.js` (pure, unit-tested helpers), modal dialogs and styles
 - `frontend/src/classic` - classic (legacy framework) entry point, built as an AMD module
 - `frontend/src/studio` - Dashboard Studio entry point and `config.json`
 - `frontend/src/manage` - Manage Saved Graphs dashboard script
@@ -199,12 +222,27 @@ SKIP_KVSTORE=1 ...                                # KV store not running (KV che
 
 GitHub Actions (`.github/workflows/ci.yml`) runs on every push and pull request: unit tests, builds the bundles and checks they match the committed files, packages the app, runs AppInspect (Splunk Cloud checks; fails on any failure or error) and runs the smoke tests on Splunk 10.4 and 9.4 in Docker. On GitHub's runners Splunk 10.4's KV store cannot start (kernel 6.19+, see Save State), so the 10.4 job reports the KV-store checks as SKIP.
 
+Packages are not committed: `./package.sh` writes `dist/` locally (ignored by git) and releases attach the package to the GitHub Release. Documentation screenshots live in `docs/screenshots/`; Splunkbase listing notes are in `docs/SPLUNKBASE.md`.
+
 ### Releasing
 1. Update `version` in `default/app.conf` (both stanzas) and `app.manifest`, and add a `#### <version>` section to the release notes below.
 2. Merge to `master`, then either push a tag (`git tag v<version> && git push origin v<version>`) or run *Actions > Release > Run workflow* on `master` with the version (the tag is created for you).
 3. `.github/workflows/release.yml` checks the tag matches `app.conf`, runs the unit tests, build check and AppInspect, and publishes a GitHub Release with `licoryx_link_analysis_app-<version>.tgz` and the AppInspect report attached, using the release notes section as the description.
 
 ### Release Notes
+#### 2.4.0
+- **Expand nodes:** add a node's neighbours from a follow-up search (classic: *Expand* options; Studio: an optional `expand` data source - built into the Explorer). Node names are always escaped and quoted in the search.
+- **Toolbar** (Search, Menu, Fit, Save) so actions are visible and keyboard accessible; **hover details** for nodes and edges (connections, count, group, type, time, extra fields).
+- **Analytics:** size nodes by PageRank or betweenness (Menu or *Node size* option); *Find Clusters* colours communities.
+- **Styling:** `src_type`/`dest_type` give node shapes with a legend; *Edge width* by count.
+- **Timeline:** results with `_time` get a slider and play button.
+- **Filters:** *Filter by Connections*, *Neighbours* (2-hop neighbourhood), *Clear Filters*.
+- **Export Image (PNG)**; optional **WebGL renderer** (experimental) for very large graphs.
+- **Security:** saved and imported graphs are sanitised (no stylesheets, URLs or unknown properties are stored or drawn); `line_color` and node colours must be plain colours.
+- **Manage Saved Graphs:** in-page rename/delete dialogs instead of browser pop-ups.
+- **Repository:** packages are no longer committed (`dist/` ignored; use GitHub Releases); screenshots and Splunkbase notes in `docs/`; release workflow can be run manually with a version.
+- **Code and tests:** new `extras.js` module; 21 unit tests; smoke tests cover every new feature (31 checks on Splunk 10.6.2 and 10.4, 22 on 9.4).
+
 #### 2.3.0
 - **Manage Saved Graphs** dashboard: open, rename, delete and import KV-store graphs; graphs now record who saved them (`saved_by`), shown there and in the Historical View.
 - **Export Graph JSON** (Menu): copy a graph as JSON and import it on the Manage page - a way to save from Dashboard Studio without HEC.

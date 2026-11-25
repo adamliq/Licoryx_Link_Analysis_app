@@ -4,7 +4,7 @@
     <definition><![CDATA[
 {
     "title": "Link Analysis Explorer",
-    "description": "Enter a search that returns a source, a target and optionally a count (plus optional line_label / line_color fields).",
+    "description": "Enter a search that returns a source, a target and optionally a count. Right-click a node > Expand to add its neighbours (set the Expand inputs first).",
     "inputs": {
         "input_search": {
             "type": "input.text",
@@ -21,6 +21,22 @@
                 "token": "tr",
                 "defaultValue": "-24h@h,now"
             }
+        },
+        "input_expand_base": {
+            "type": "input.text",
+            "title": "Expand base search (optional; node name is added as a quoted term)",
+            "options": {
+                "token": "expand_base",
+                "defaultValue": ""
+            }
+        },
+        "input_expand_stats": {
+            "type": "input.text",
+            "title": "Expand stats",
+            "options": {
+                "token": "expand_stats",
+                "defaultValue": "| stats count by src_ip dest_ip"
+            }
         }
     },
     "dataSources": {
@@ -34,6 +50,17 @@
                     "latest": "$tr.latest$"
                 }
             }
+        },
+        "ds_expand": {
+            "type": "ds.search",
+            "name": "Expand node",
+            "options": {
+                "query": "$expand_base$ $expand_node|s$ $expand_stats$",
+                "queryParameters": {
+                    "earliest": "$tr.earliest$",
+                    "latest": "$tr.latest$"
+                }
+            }
         }
     },
     "visualizations": {
@@ -41,15 +68,31 @@
             "type": "licoryx_link_analysis_app.link_analysis_studio",
             "title": "Link Analysis",
             "dataSources": {
-                "primary": "ds_graph"
+                "primary": "ds_graph",
+                "expand": "ds_expand"
             },
             "options": {
                 "layoutStyle": "fcose",
                 "pathAlgo": "dijkstra",
                 "directed": false,
                 "recursiveLookup": true,
-                    "maxRows": 10000
-            }
+                "maxRows": 10000,
+                "nodeSize": "fixed",
+                "edgeWidth": "fixed"
+            },
+            "eventHandlers": [
+                {
+                    "type": "drilldown.setToken",
+                    "options": {
+                        "tokens": [
+                            {
+                                "token": "expand_node",
+                                "key": "value"
+                            }
+                        ]
+                    }
+                }
+            ]
         }
     },
     "layout": {
@@ -60,7 +103,9 @@
         },
         "globalInputs": [
             "input_time",
-            "input_search"
+            "input_search",
+            "input_expand_base",
+            "input_expand_stats"
         ],
         "structure": [
             {

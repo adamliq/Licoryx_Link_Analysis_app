@@ -43,10 +43,42 @@
             <option value="fixed">Fixed</option>
             <option value="degree">By number of connections</option>
             <option value="count">By total count</option>
+            <option value="pagerank">By PageRank</option>
+            <option value="betweenness">By betweenness</option>
         </splunk-select>
     </splunk-control-group>
     <splunk-control-group label="Large graph threshold (nodes)">
         <splunk-text-input name="{{VIZ_NAMESPACE}}.largeGraphNodes" value="2000">
+        </splunk-text-input>
+    </splunk-control-group>
+    <splunk-control-group label="Edge width">
+        <splunk-select name="{{VIZ_NAMESPACE}}.edgeWidth" value="fixed">
+            <option value="fixed">Fixed</option>
+            <option value="count">By count</option>
+        </splunk-select>
+    </splunk-control-group>
+    <splunk-control-group label="Renderer">
+        <splunk-select name="{{VIZ_NAMESPACE}}.renderer" value="canvas">
+            <option value="canvas">Canvas</option>
+            <option value="webgl">WebGL (experimental)</option>
+        </splunk-select>
+    </splunk-control-group>
+</form>
+<form class="splunk-formatter-section" section-label="Expand Nodes">
+    <splunk-control-group label="Expand base search (node name is added as a quoted term)" help="e.g. index=firewall sourcetype=fw">
+        <splunk-text-input name="{{VIZ_NAMESPACE}}.expandBase" value="">
+        </splunk-text-input>
+    </splunk-control-group>
+    <splunk-control-group label="Expand stats (must output source, target, count)">
+        <splunk-text-input name="{{VIZ_NAMESPACE}}.expandStats" value="| stats count by src_ip dest_ip">
+        </splunk-text-input>
+    </splunk-control-group>
+    <splunk-control-group label="Expand earliest time">
+        <splunk-text-input name="{{VIZ_NAMESPACE}}.expandEarliest" value="-24h@h">
+        </splunk-text-input>
+    </splunk-control-group>
+    <splunk-control-group label="Expand latest time">
+        <splunk-text-input name="{{VIZ_NAMESPACE}}.expandLatest" value="now">
         </splunk-text-input>
     </splunk-control-group>
 </form>

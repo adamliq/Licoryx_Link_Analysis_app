@@ -9,7 +9,7 @@
  */
 /* global SplunkVisualizationBase, SplunkVisualizationUtils */
 import createLinkAnalysisClass from '../core/link_analysis_core.js';
-import { checkKvStore, currentUser, graphs } from './splunkweb.js';
+import { checkKvStore, currentUser, graphs, runExpandSearch } from './splunkweb.js';
 import '../core/core.css';
 
 export default createLinkAnalysisClass(SplunkVisualizationBase, SplunkVisualizationUtils, {
@@ -17,4 +17,5 @@ export default createLinkAnalysisClass(SplunkVisualizationBase, SplunkVisualizat
     saveToKvStore: (record) => graphs.create(record),
     checkKvStore,
     currentUser,
+    runSearch: runExpandSearch,
 });
