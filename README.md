@@ -187,7 +187,7 @@ Post any feature requests as issues and I will look around to them.  My only fee
 - Splunk AppInspect (cloud tags) - no failures
 
 ### Dashboard Studio-only edition
-`./package-studio-only.sh` builds `dist/licoryx_link_analysis_app-<version>-studio-only.tgz`: only the Studio visualization and the Studio dashboards (Explorer, read-only Historical View), without Save State, Expand, exports and the Manage page - the features that need workarounds for Studio's sandboxed frame. It passes AppInspect without the legacy-visualization warning. Test it with `LLA_EDITION=studio-only node tests/smoke.mjs`. See [docs/STUDIO_MIGRATION.md](docs/STUDIO_MIGRATION.md) for the investigation and results.
+`./package-studio-only.sh` builds `dist/licoryx_link_analysis_app-<version>-studio-only.tgz`: only the Studio visualization and the Studio dashboards (Explorer, read-only Historical View), without Save State, Expand, exports and the Manage page - the features that need workarounds for Studio's sandboxed frame. It passes AppInspect without the legacy-visualization warning. Test it with `LLA_EDITION=studio-only node tests/smoke.mjs`. Each GitHub Release (from 2.4.2) attaches it next to the normal package. See [docs/STUDIO_MIGRATION.md](docs/STUDIO_MIGRATION.md) for the investigation and results.
 
 ### Classic visualization and Splunk's legacy framework
 AppInspect warns that legacy custom visualizations (`framework_type = legacy_visualization`, used by the Classic visualization) are deprecated in Splunk 10.6. Plan:
@@ -230,9 +230,14 @@ Packages are not committed: `./package.sh` writes `dist/` locally (ignored by gi
 ### Releasing
 1. Update `version` in `default/app.conf` (both stanzas) and `app.manifest`, and add a `#### <version>` section to the release notes below.
 2. Merge to `master`, then either push a tag (`git tag v<version> && git push origin v<version>`) or run *Actions > Release > Run workflow* on `master` with the version (the tag is created for you).
-3. `.github/workflows/release.yml` checks the tag matches `app.conf`, runs the unit tests, build check and AppInspect, and publishes a GitHub Release with `licoryx_link_analysis_app-<version>.tgz` and the AppInspect report attached, using the release notes section as the description.
+3. `.github/workflows/release.yml` checks the tag matches `app.conf`, runs the unit tests, build check and AppInspect, and publishes a GitHub Release with `licoryx_link_analysis_app-<version>.tgz`, `licoryx_link_analysis_app-<version>-studio-only.tgz` and both AppInspect reports attached, using the release notes section as the description.
 
 ### Release Notes
+#### 2.4.2
+- **Studio visualization hidden from the search page and Simple XML picker** (`allow_user_selection = false`): it only runs inside Dashboard Studio and failed with "DashboardExtensionAPI is not available" elsewhere. Classic dashboards and the search page keep using the Classic visualization.
+- **Studio-only package attached to GitHub Releases** (`licoryx_link_analysis_app-<version>-studio-only.tgz`, with its own AppInspect report).
+- Studio-only edition: the Historical View text no longer mentions the Save State menu, which that edition does not have.
+
 #### 2.4.1
 - **Toolbar moved to the top-left:** in Dashboard Studio the panel's own hover actions (Inspect, Open externally) covered the bottom-right toolbar.
 - **Dashboard Studio-only edition** (`package-studio-only.sh`), tested in CI; findings in `docs/STUDIO_MIGRATION.md`.

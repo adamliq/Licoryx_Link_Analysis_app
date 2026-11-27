@@ -51,7 +51,9 @@ jobs:
         run: git diff --exit-code --stat -- appserver/static
 
       - name: Package app
-        run: ./package.sh
+        run: |
+          ./package.sh
+          ./package-studio-only.sh
 
       - uses: actions/setup-python@v7
         with:
@@ -60,14 +62,16 @@ jobs:
       - name: AppInspect (Splunk Cloud checks)
         run: |
           pip install --quiet splunk-appinspect
-          splunk-appinspect inspect "dist/licoryx_link_analysis_app-$VERSION.tgz" --mode precert --included-tags cloud \
-            --output-file appinspect.json --data-format json
-          python3 - <<'PY'
+          for f in "" "-studio-only"; do
+            splunk-appinspect inspect "dist/licoryx_link_analysis_app-$VERSION$f.tgz" --mode precert --included-tags cloud \
+              --output-file "appinspect$f.json" --data-format json
+            python3 - "appinspect$f.json" <<'PY'
           import json, sys
-          s = json.load(open('appinspect.json'))['summary']
-          print(s)
+          s = json.load(open(sys.argv[1]))['summary']
+          print(sys.argv[1], s)
           sys.exit(1 if s.get('error') or s.get('failure') else 0)
           PY
+          done
 
       - name: Release notes from README
         run: |
@@ -78,6 +82,7 @@ jobs:
           m = re.search(r'^#### ' + re.escape(version) + r'\s*\n(.*?)(?=^#### |^### |\Z)', text, re.S | re.M)
           notes = m.group(1).strip() if m else f'Licoryx Link Analysis App {version}.'
           notes += '\n\nInstall `licoryx_link_analysis_app-' + version + '.tgz` via Apps > Manage Apps > Install app from file.'
+          notes += ' For a Dashboard Studio-only install (no Classic visualization, Save State, Expand, exports or Manage page) use `licoryx_link_analysis_app-' + version + '-studio-only.tgz` instead.'
           open('release-notes.md', 'w', encoding='utf-8').write(notes + '\n')
           print(notes)
           PY
@@ -88,4 +93,5 @@ jobs:
         run: |
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then TARGET="--target $GITHUB_SHA"; else TARGET="--verify-tag"; fi
           gh release create "$TAG" "dist/licoryx_link_analysis_app-$VERSION.tgz" appinspect.json \
+            "dist/licoryx_link_analysis_app-$VERSION-studio-only.tgz" appinspect-studio-only.json \
             --title "Licoryx Link Analysis App $VERSION" --notes-file release-notes.md $TARGET

@@ -25,11 +25,11 @@ def edit(path, fn):
     p = f"{a}/{path}"
     s = open(p, encoding="utf-8").read()
     open(p, "w", encoding="utf-8").write(fn(s))
-# visualizations.conf: only the Studio visualization; keep it out of the search page picker,
-# where Studio-framework visualizations cannot run.
+# visualizations.conf: only the Studio visualization (already kept out of the search page picker).
 edit("default/visualizations.conf", lambda s: "\n".join([
     "#", "# Studio-only edition: Dashboard Studio custom visualization (extension framework) only", "#", "",
-    s[s.index("[link_analysis_studio]"):].rstrip() + "\nallow_user_selection = false", ""]))
+    s[s.index("[link_analysis_studio]"):].rstrip()
+    .replace(", and load graphs saved with Save State.", ".") , ""]))
 # metadata: drop the classic visualization export
 edit("metadata/default.meta", lambda s: re.sub(r"\[visualizations/link_analysis\]\nexport = system\n?", "", s))
 # navigation: no Manage page
@@ -51,8 +51,10 @@ def explorer(s):
     return s[:i] + "\n" + json.dumps(d, indent=4) + "\n    " + s[j:]
 edit("default/data/ui/views/link_analysis_explorer.xml", explorer)
 # Historical View: read-only (graphs saved earlier)
-edit("default/data/ui/views/link_analysis_historical_view.xml", lambda s: s.replace(
-    "Load a graph previously saved with the Save State menu.", "Open a graph saved earlier (read-only; this edition has no Save State)."))
+RO = "Open a graph saved earlier (read-only; this edition has no Save State)."
+edit("default/data/ui/views/link_analysis_historical_view.xml", lambda s: re.sub(
+    r'"description": "Load a graph previously saved with the Save State menu[^"]*"', '"description": "' + RO + '"',
+    s.replace("Load a graph previously saved with the Save State menu.", RO)))
 # Studio config: no "expand" data source
 cfg = f"{a}/appserver/static/visualizations/link_analysis_studio/config.json"
 c = json.load(open(cfg)); c["config"]["dataContract"]["optionalDataSources"] = []
