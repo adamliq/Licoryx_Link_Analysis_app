@@ -47,6 +47,10 @@ let instanceCounter = 0;
  */
 function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, features) {
   features = features || {};
+  // Features a build can switch off (e.g. the Studio-only edition): 'saveState', 'expand', 'exportJson', 'exportImage'.
+  var disabledFeatures = features.disabled || [];
+  function off(name) { return disabledFeatures.indexOf(name) !== -1; }
+  var MENU_FEATURES = { 'Save State': 'saveState', 'Export Graph JSON': 'exportJson', 'Export Image (PNG)': 'exportImage' };
   instanceCounter += 1;
   var UID = 'lla' + instanceCounter;
   var CY_ID = UID + '-cy';
@@ -1012,8 +1016,8 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
               { id: 'search', label: 'Search', title: 'Search nodes', handler: openSearchDialog },
               { id: 'menu', label: 'Menu', title: 'More actions', handler: function () { openMenuDialog(cy); } },
               { id: 'fit', label: 'Fit', title: 'Fit the graph to the panel', handler: function () { cy.fit(undefined, 30); } },
-              { id: 'save', label: 'Save', title: 'Save State', handler: openSaveStateDialog }
-            ]);
+              { id: 'save', label: 'Save', title: 'Save State', handler: openSaveStateDialog, feature: 'saveState' }
+            ].filter(function (a) { return !a.feature || !off(a.feature); }));
             let boxedNodes = cy.collection();
             let elemsWChildren = cy.collection();
             if (preRemove) {
@@ -1057,7 +1061,7 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
             menuDataList.setAttribute("id", MENU_LIST_ID);
             menu_list_items = ['Delete Highlighted Items', 'Delete Non-Highlighted Items', 'Refresh', 'Clear Formatting', 'Save State', 'Style Edges', 'Export Graph JSON',
               'Export Image (PNG)', 'Size by PageRank', 'Size by Betweenness', 'Find Clusters', 'Filter by Connections', 'Clear Filters'];
-            menu_list_items = menu_list_items.sort()
+            menu_list_items = menu_list_items.filter(function (item) { return !MENU_FEATURES[item] || !off(MENU_FEATURES[item]); }).sort()
             menu_list_items.forEach(function (item) {
               var option = document.createElement('option');
               option.value = item;
@@ -1076,10 +1080,10 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
             var cxtColors = menuColors(!!bgColor && isDarkColor(bgColor));
             cy.cxtmenu(Object.assign({}, cxtColors, {
               selector: 'node',
-              commands: [{
+              commands: (off('expand') ? [] : [{
                   content: 'Expand',
                   select: function (ele) { expandNode(ele); },
-                },
+                }]).concat([
                 {
                   content: 'Neighbours',
                   select: function (ele) {
@@ -1287,7 +1291,7 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
                   },
                 },
 
-              ]
+              ])
             }));
 
             cy.cxtmenu(Object.assign({}, cxtColors, {
@@ -1653,6 +1657,7 @@ function createLinkAnalysis(SplunkVisualizationBase, SplunkVisualizationUtils, f
           } };
 
           function returnMenu(ele, x) {
+            if (x && MENU_FEATURES[x.value] && off(MENU_FEATURES[x.value])) return; // switched off in this build
 
             switch (x.value) {
               case "Delete Highlighted Items":

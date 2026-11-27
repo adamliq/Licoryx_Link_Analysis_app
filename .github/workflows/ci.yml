@@ -30,8 +30,10 @@ jobs:
       - name: Committed bundles match the source
         run: git diff --exit-code --stat -- appserver/static
 
-      - name: Package app
-        run: ./package.sh
+      - name: Package app (and the Studio-only edition)
+        run: |
+          ./package.sh
+          ./package-studio-only.sh
 
       - uses: actions/setup-python@v7
         with:
@@ -40,12 +42,14 @@ jobs:
       - name: AppInspect (Splunk Cloud checks)
         run: |
           pip install --quiet splunk-appinspect
-          PKG=$(ls dist/licoryx_link_analysis_app-*.tgz | sort -V | tail -1)
-          splunk-appinspect inspect "$PKG" --mode precert --included-tags cloud \
-            --output-file appinspect.json --data-format json
-          python3 - <<'PY'
+          for PKG in $(ls dist/licoryx_link_analysis_app-*.tgz); do
+            echo "== $PKG"
+            OUT="appinspect-$(basename "$PKG" .tgz).json"
+            splunk-appinspect inspect "$PKG" --mode precert --included-tags cloud \
+              --output-file "$OUT" --data-format json
+            python3 - "$OUT" <<'PY'
           import json, sys
-          d = json.load(open('appinspect.json'))
+          d = json.load(open(sys.argv[1]))
           s = d['summary']
           print({k: s.get(k) for k in ('error', 'failure', 'future_failure', 'warning', 'success')})
           for r in d['reports']:
@@ -55,16 +59,17 @@ jobs:
                           print(c['result'].upper(), c['name'])
           sys.exit(1 if s.get('error') or s.get('failure') else 0)
           PY
+          done
 
       - uses: actions/upload-artifact@v7
         with:
           name: app-package
           path: |
             dist/licoryx_link_analysis_app-*.tgz
-            appinspect.json
+            appinspect-*.json
 
   smoke:
-    name: Smoke test on Splunk ${{ matrix.splunk }}
+    name: Smoke test on Splunk ${{ matrix.splunk }}${{ matrix.edition && format(' ({0})', matrix.edition) || '' }}
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -74,6 +79,9 @@ jobs:
         include:
           - splunk: "10.6.2"
             skip_studio: "0"
+          - splunk: "10.6.2"
+            skip_studio: "0"
+            edition: "studio-only"
           - splunk: "10.4"
             skip_studio: "0"
           - splunk: "9.4"
@@ -90,7 +98,12 @@ jobs:
 
       - name: Start Splunk ${{ matrix.splunk }} with the app
         run: |
-          PKG=$(ls artifact/dist/licoryx_link_analysis_app-*.tgz | sort -V | tail -1)
+          if [ "${{ matrix.edition }}" = "studio-only" ]; then
+            PKG=$(ls artifact/dist/licoryx_link_analysis_app-*-studio-only.tgz | sort -V | tail -1)
+          else
+            PKG=$(ls artifact/dist/licoryx_link_analysis_app-*.tgz | grep -v studio-only | sort -V | tail -1)
+          fi
+          echo "Installing $PKG"
           cp "$PKG" /tmp/app.tgz
           docker run -d --name splunk -p 8000:8000 -p 8089:8089 \
             -e SPLUNK_GENERAL_TERMS=--accept-sgt-current-at-splunk-com \
@@ -144,10 +157,11 @@ jobs:
         working-directory: tests
         env:
           SKIP_STUDIO: ${{ matrix.skip_studio }}
+          LLA_EDITION: ${{ matrix.edition }}
         run: node smoke.mjs screenshots
 
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: smoke-screenshots-${{ matrix.splunk }}
+          name: smoke-screenshots-${{ matrix.splunk }}${{ matrix.edition && format('-{0}', matrix.edition) || '' }}
           path: tests/screenshots

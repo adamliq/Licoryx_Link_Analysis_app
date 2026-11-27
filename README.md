@@ -43,7 +43,7 @@ Options (also in the editor's *Visualization Style* section): `layoutStyle` (fco
 If a search returns a saved graph (a `graph_info` field from the KV store, or a `_raw` HEC event, as written by *Save State*), the Studio visualization renders it with its saved positions.
 
 ### Working with the graph
-- **Toolbar** (bottom right): *Search* nodes, *Menu* (all actions below), *Fit* the graph, *Save* State. Every action is also on the right-click (or press-and-hold) menus.
+- **Toolbar** (top left): *Search* nodes, *Menu* (all actions below), *Fit* the graph, *Save* State. Every action is also on the right-click (or press-and-hold) menus.
 - **Hover** a node for its connections, total count, group and type; hover an edge for its count, label, time and the other fields of that row.
 - **Timeline:** if the results have a `_time` column (put it after the source and target columns), a slider at the bottom shows the graph up to a point in time; *Play* animates it.
 - **Node menu:** *Expand*, *Neighbours* (show only the 2-hop neighbourhood), path selection, *Focus*, *Condense*.
@@ -186,6 +186,9 @@ Post any feature requests as issues and I will look around to them.  My only fee
 - Splunk Enterprise 10.2 - Classic visualization only (no Studio extension framework)
 - Splunk AppInspect (cloud tags) - no failures
 
+### Dashboard Studio-only edition
+`./package-studio-only.sh` builds `dist/licoryx_link_analysis_app-<version>-studio-only.tgz`: only the Studio visualization and the Studio dashboards (Explorer, read-only Historical View), without Save State, Expand, exports and the Manage page - the features that need workarounds for Studio's sandboxed frame. It passes AppInspect without the legacy-visualization warning. Test it with `LLA_EDITION=studio-only node tests/smoke.mjs`. See [docs/STUDIO_MIGRATION.md](docs/STUDIO_MIGRATION.md) for the investigation and results.
+
 ### Classic visualization and Splunk's legacy framework
 AppInspect warns that legacy custom visualizations (`framework_type = legacy_visualization`, used by the Classic visualization) are deprecated in Splunk 10.6. Plan:
 - Splunk 10.6.2 still supports them (its `visualizations.conf.spec` lists `legacy_visualization` as the default) and the Classic visualization passes all smoke tests there; CI keeps testing the newest Splunk release so removal is caught early.
@@ -230,6 +233,11 @@ Packages are not committed: `./package.sh` writes `dist/` locally (ignored by gi
 3. `.github/workflows/release.yml` checks the tag matches `app.conf`, runs the unit tests, build check and AppInspect, and publishes a GitHub Release with `licoryx_link_analysis_app-<version>.tgz` and the AppInspect report attached, using the release notes section as the description.
 
 ### Release Notes
+#### 2.4.1
+- **Toolbar moved to the top-left:** in Dashboard Studio the panel's own hover actions (Inspect, Open externally) covered the bottom-right toolbar.
+- **Dashboard Studio-only edition** (`package-studio-only.sh`), tested in CI; findings in `docs/STUDIO_MIGRATION.md`.
+- Smoke tests now also exercise hover details, Search, analytics, filters, timeline and shapes inside Dashboard Studio.
+
 #### 2.4.0
 - **Expand nodes:** add a node's neighbours from a follow-up search (classic: *Expand* options; Studio: an optional `expand` data source - built into the Explorer). Node names are always escaped and quoted in the search.
 - **Toolbar** (Search, Menu, Fit, Save) so actions are visible and keyboard accessible; **hover details** for nodes and edges (connections, count, group, type, time, extra fields).

@@ -7,3 +7,4 @@ docs/ export-ignore
 frontend/ export-ignore
 tests/ export-ignore
 .github/ export-ignore
+package-studio-only.sh export-ignore
