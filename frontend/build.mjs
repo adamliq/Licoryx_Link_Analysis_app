@@ -17,6 +17,9 @@ import { fileURLToPath } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 const vizRoot = join(here, '..', 'appserver', 'static', 'visualizations');
 const dev = process.argv.includes('--dev');
+// --studio-only: build only the Studio visualization, with Save State, Expand and exports
+// switched off, into frontend/dist-studio-only/ (used by package-studio-only.sh).
+const studioOnly = process.argv.includes('--studio-only');
 
 // Import .css files as code that injects a <style> element.
 const cssInjectPlugin = {
@@ -50,6 +53,21 @@ const common = {
     logLevel: 'warning',
     logOverride: { 'duplicate-object-key': 'silent' },
 };
+
+if (studioOnly) {
+    const outDir = join(here, 'dist-studio-only');
+    mkdirSync(outDir, { recursive: true });
+    await build({
+        ...common,
+        define: { ...common.define, __LLA_STUDIO_ONLY__: 'true' },
+        entryPoints: [join(here, 'src', 'studio', 'visualization.js')],
+        outfile: join(outDir, 'visualization.js'),
+        format: 'esm',
+    });
+    copyFileSync(join(here, 'src', 'studio', 'config.json'), join(outDir, 'config.json'));
+    console.log('Built studio-only -> frontend/dist-studio-only/visualization.js');
+    process.exit(0);
+}
 
 // Classic: wrap an IIFE in an AMD define() that receives Splunk's viz API modules.
 await build({

@@ -101,10 +101,17 @@ SplunkVisualizationBase.FIELD_VALUE_DRILLDOWN = 'fieldvalue';
 // "Expand" (node menu): ask the dashboard for neighbours via a drilldown event; a dashboard
 // that binds an "expand" data source (filtered by that token) sends the rows back, and
 // they are merged into the graph (see addDataSourcesListener below).
+// Studio-only edition (build.mjs --studio-only): no Save State, Expand or exports - the
+// features that need workarounds for Studio's sandboxed frame.
+/* global __LLA_STUDIO_ONLY__ */
+const STUDIO_ONLY = typeof __LLA_STUDIO_ONLY__ !== 'undefined' && __LLA_STUDIO_ONLY__ === true;
+const STUDIO_ONLY_DISABLED = ['saveState', 'expand', 'exportJson', 'exportImage'];
+
 let expandRequested = false;
 let lastExpandRows = null; // last results of the "expand" data source
 const LinkAnalysisViz = createLinkAnalysisClass(SplunkVisualizationBase, SplunkVisualizationUtils, {
     kvstore: false,
+    disabled: STUDIO_ONLY ? STUDIO_ONLY_DISABLED : [],
     requestExpand(label) {
         // If the dashboard already returned results for this node (the token did not change,
         // so the search will not run again), merge those straight away.

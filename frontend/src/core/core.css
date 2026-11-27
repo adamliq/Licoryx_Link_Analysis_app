@@ -75,7 +75,7 @@
 
 .lla-reset {
     position: absolute;
-    top: 8px;
+    top: 42px;
     left: 8px;
     z-index: 7;
     padding: 4px 14px;
@@ -207,10 +207,12 @@
 
 /* ---- 2.4.0: toolbar, hover details, timeline, legend shapes, image export ---- */
 
+/* Top-left: Dashboard Studio overlays its own panel actions (Inspect, Open externally) at the
+   bottom-right of a panel on hover, and the legend uses the top-right corner. */
 .lla-toolbar {
     position: absolute;
-    right: 8px;
-    bottom: 8px;
+    left: 8px;
+    top: 8px;
     z-index: 6;
     display: flex;
     gap: 4px;

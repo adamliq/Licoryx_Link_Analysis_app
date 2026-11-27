@@ -9,6 +9,7 @@
  * Requires Playwright with Chromium. Exits non-zero if any check fails.
  * Set SKIP_STUDIO=1 for Splunk versions without the Dashboard Studio
  * extension framework (before 10.4): only the classic checks run.
+ * Set LLA_EDITION=studio-only to test the Studio-only package (see package-studio-only.sh).
  * Set SKIP_KVSTORE=1 when the host's KV store cannot run (e.g. Splunk 10.4's
  * MongoDB on Linux kernel 6.19+): the KV-store checks are reported as SKIP.
  */
@@ -26,6 +27,9 @@ const OUT = process.argv[2] || 'smoke-screenshots';
 const APP = 'licoryx_link_analysis_app';
 const SKIP_STUDIO = /^(1|true|yes)$/i.test(process.env.SKIP_STUDIO || '');
 const SKIP_KVSTORE = /^(1|true|yes)$/i.test(process.env.SKIP_KVSTORE || '');
+// LLA_EDITION=studio-only: the Dashboard Studio-only package (package-studio-only.sh). Classic checks
+// are skipped; the removed features (Save State, Expand, exports, Manage page) must be absent.
+const STUDIO_ONLY = process.env.LLA_EDITION === 'studio-only';
 if (!PASS) {
     console.error('SPLUNK_PASSWORD is required');
     process.exit(2);
@@ -93,6 +97,7 @@ const studioDefinition = {
     dataSources: {
         ds_two: { type: 'ds.search', options: { query: TWO_NODES, queryParameters: { earliest: '-15m', latest: 'now' } } },
         ds_big: { type: 'ds.search', options: { query: BIG, queryParameters: { earliest: '-15m', latest: 'now' } } },
+        ds_timed: { type: 'ds.search', options: { query: '| makeresults count=12 | streamstats count as n | eval _time=_time-n*300, src_ip="host".(n%4), dest_ip="srv".(n%3), count=n, src_type="workstation", dest_type="server" | table src_ip dest_ip count src_type dest_type _time', queryParameters: { earliest: '-24h', latest: 'now' } } },
         ds_expand: { type: 'ds.search', options: { query: `${EXPAND_BASE} $expand_node|s$ | stats count by src_ip dest_ip`, queryParameters: { earliest: '-15m', latest: 'now' } } },
     },
     visualizations: {
@@ -103,18 +108,24 @@ const studioDefinition = {
         },
         viz_big: { type: STUDIO, title: 'big', dataSources: { primary: 'ds_big' }, options: { layoutStyle: 'grid', maxRows: 15000 } },
         viz_md: { type: 'splunk.markdown', options: { markdown: 'clicked=$clicked$' } },
+        viz_timed: { type: STUDIO, title: 'timed', dataSources: { primary: 'ds_timed' }, options: { edgeWidth: 'count' } },
     },
     inputs: {},
     defaults: {},
     layout: {
-        type: 'absolute', options: { width: 1400, height: 900 },
+        type: 'absolute', options: { width: 1400, height: 840 },
         structure: [
             { item: 'viz_two', type: 'block', position: { x: 0, y: 0, w: 700, h: 400 } },
             { item: 'viz_big', type: 'block', position: { x: 700, y: 0, w: 700, h: 400 } },
             { item: 'viz_md', type: 'block', position: { x: 0, y: 420, w: 700, h: 60 } },
+            { item: 'viz_timed', type: 'block', position: { x: 700, y: 420, w: 700, h: 400 } },
         ],
     },
 };
+if (STUDIO_ONLY) {
+    delete studioDefinition.dataSources.ds_expand;
+    delete studioDefinition.visualizations.viz_two.dataSources.expand;
+}
 const studioDashboard = `<dashboard version="2" theme="light"><label>LLA smoke studio</label><definition><![CDATA[${JSON.stringify(studioDefinition)}]]></definition></dashboard>`;
 
 // Wait (up to ~5 minutes) for the KV store; returns true when ready.
@@ -263,7 +274,7 @@ async function menuItem(page, scope, item) {
     await login(page);
 
     // 1. Classic viz on the search page.
-    {
+    if (!STUDIO_ONLY) {
         const errors = [];
         collectErrors(page, errors);
         const q = encodeURIComponent(SAMPLE);
@@ -335,7 +346,7 @@ async function menuItem(page, scope, item) {
     }
 
     // 1a. KV store down: Save State must switch to the HTTP Event Collector by itself.
-    if (SKIP_KVSTORE) {
+    if (SKIP_KVSTORE && !STUDIO_ONLY) {
         let detail = '';
         let ok = false;
         try {
@@ -357,7 +368,7 @@ async function menuItem(page, scope, item) {
     }
 
     // 1c. Styling: src_group/dest_group legend, node size by count, large-graph layout fallback.
-    {
+    if (!STUDIO_ONLY) {
         const GROUPS = '| makeresults count=12 | streamstats count as n | eval src_ip="host".(n%4), dest_ip="srv".(n%3), count=n, src_group="workstations", dest_group="servers" | table src_ip dest_ip count src_group dest_group';
         const q = encodeURIComponent(GROUPS);
         await page.goto(`${WEB}/en-US/app/${APP}/search?q=${q}&earliest=-15m&latest=now&display.page.search.tab=visualizations&display.general.type=visualizations&display.visualizations.type=custom&display.visualizations.custom.type=${CLASSIC}&display.visualizations.custom.${CLASSIC}.nodeSize=count`);
@@ -376,7 +387,7 @@ async function menuItem(page, scope, item) {
     }
 
     // 1e. Timeline (_time), node types (src_type/dest_type) with shapes, edge width by count, WebGL renderer.
-    {
+    if (!STUDIO_ONLY) {
         const TIMED = '| makeresults count=12 | streamstats count as n | eval _time=_time-n*300, src_ip="host".(n%4), dest_ip="srv".(n%3), count=n, src_type="workstation", dest_type="server" | table src_ip dest_ip count src_type dest_type _time';
         await page.goto(`${WEB}/en-US/app/${APP}/search?q=${encodeURIComponent(TIMED)}&earliest=-24h&latest=now&display.page.search.tab=visualizations&display.general.type=visualizations&display.visualizations.type=custom&display.visualizations.custom.type=${CLASSIC}&display.visualizations.custom.${CLASSIC}.edgeWidth=count`);
         await page.waitForSelector('.lla-cy canvas', { timeout: 90000, state: 'attached' }).catch(() => {});
@@ -407,7 +418,7 @@ async function menuItem(page, scope, item) {
     }
 
     // 1d. Manage Saved Graphs: list, rename, import (from Export Graph JSON format) and delete.
-    if (!SKIP_KVSTORE) {
+    if (!SKIP_KVSTORE && !STUDIO_ONLY) {
         let detail = '';
         let ok = false;
         try {
@@ -455,7 +466,7 @@ async function menuItem(page, scope, item) {
         } catch (e) {
             check('imported graphs are stored without styles or URLs', false, e.message);
         }
-    } else {
+    } else if (!STUDIO_ONLY) {
         skip('Manage Saved Graphs lists, imports, renames and deletes graphs', 'SKIP_KVSTORE set');
         await page.goto(`${WEB}/en-US/app/${APP}/manage_saved_graphs`);
         await page.waitForTimeout(8000);
@@ -464,7 +475,7 @@ async function menuItem(page, scope, item) {
     }
 
     // 1b. Row limit warning (classic): 30 rows with maxRows=10.
-    {
+    if (!STUDIO_ONLY) {
         const q = encodeURIComponent(SAMPLE);
         await page.goto(`${WEB}/en-US/app/${APP}/search?q=${q}&earliest=-15m&latest=now&display.page.search.tab=visualizations&display.general.type=visualizations&display.visualizations.type=custom&display.visualizations.custom.type=${CLASSIC}&display.visualizations.custom.${CLASSIC}.maxRows=10`);
         await page.waitForSelector('.lla-cy canvas', { timeout: 90000 }).catch(() => {});
@@ -474,7 +485,7 @@ async function menuItem(page, scope, item) {
     }
 
     // 2. Two classic panels on one dashboard + drilldown.
-    {
+    if (!STUDIO_ONLY) {
         const p2 = await context.newPage();
         const errors = [];
         collectErrors(p2, errors);
@@ -561,7 +572,18 @@ async function menuItem(page, scope, item) {
         // Expand first (fresh expand search), before the double-click test sets the same token.
         let sExpand = '';
         let sExpandOk = false;
-        if (frames[0]) {
+        if (STUDIO_ONLY && frames[0]) {
+            const alphaAt = await findNode(p4, frames[0].frame, frames[0].box, 'alpha');
+            let items = [];
+            if (alphaAt) {
+                await p4.mouse.move(alphaAt.x, alphaAt.y);
+                await p4.mouse.down({ button: 'right' });
+                await p4.waitForTimeout(600);
+                items = (await frames[0].frame.locator('.cxtmenu-content').allTextContents()).map((t) => t.trim());
+                await p4.mouse.up({ button: 'right' });
+            }
+            check('studio-only: node menu has no Expand', items.length > 0 && !items.includes('Expand'), items.join(', '));
+        } else if (frames[0]) {
             try {
                 const alphaAt = await findNode(p4, frames[0].frame, frames[0].box, 'alpha');
                 if (!alphaAt) throw new Error('alpha not found');
@@ -573,7 +595,7 @@ async function menuItem(page, scope, item) {
                 sExpand = e.message;
             }
         }
-        check('Studio Expand merges the "expand" data source into the graph', sExpandOk, sExpand);
+        if (!STUDIO_ONLY) check('Studio Expand merges the "expand" data source into the graph', sExpandOk, sExpand);
         let clicked = '';
         if (frames[0]) {
             const box = frames[0].box;
@@ -590,6 +612,12 @@ async function menuItem(page, scope, item) {
         console.log(`      info: Studio row warning for 20000-row search with maxRows=15000: "${warning}"`);
         check('Studio warns when rows exceed "Maximum rows"', /first 15000 of 20000/.test(warning), warning || 'no warning shown');
         await p4.screenshot({ path: `${OUT}/studio-smoke.png` });
+        let timedFrame = null;
+        for (const f of p4.frames().filter((fr) => fr.url() === 'about:srcdoc')) {
+            if (await f.locator('.lla-timeline-slider').count()) timedFrame = f;
+        }
+        const sTypes = timedFrame ? (await timedFrame.locator('.lla-legend-type').allTextContents()).map((t) => t.trim().slice(1)).sort() : [];
+        check('Studio: _time adds a timeline and src_type/dest_type add shapes with a legend', !!timedFrame && sTypes.join(',') === 'server,workstation', timedFrame ? sTypes.join(',') : 'no timeline in any Studio panel');
         check('no page errors on the Studio smoke dashboard', errors.length === 0, errors.join(' | '));
         await p4.close();
     }
@@ -609,7 +637,20 @@ async function menuItem(page, scope, item) {
 
         let exportDetail = '';
         let exportOk = false;
-        try {
+        if (STUDIO_ONLY) {
+            const tools = await frame.locator('.lla-toolbar .lla-tool').allTextContents();
+            check('studio-only: toolbar is Search, Menu, Fit (no Save)', tools.join(',') === 'Search,Menu,Fit', tools.join(','));
+            const menuItems = await frame.locator('datalist[id$="-menu_list"] option').evaluateAll((os) => os.map((o) => o.value));
+            const removed = ['Save State', 'Export Graph JSON', 'Export Image (PNG)'].filter((m) => menuItems.includes(m));
+            check('studio-only: Menu has no Save State or exports', menuItems.length > 0 && removed.length === 0, `${menuItems.length} items; present: ${removed.join(', ') || 'none'}`);
+            // Typing a removed item into the Menu dialog does nothing.
+            await frame.locator('.lla-tool-menu').first().click();
+            await frame.fill('#menu_select', 'Save State');
+            await frame.click('.lla-modal-footer .btn-primary');
+            await p3.waitForTimeout(1000);
+            const opened = await frame.locator('.lla-modal-title').allTextContents();
+            check('studio-only: typing "Save State" in Menu opens nothing', opened.length === 0, opened.join(', ') || 'no dialog');
+        } else try {
             const box = await (await frame.frameElement()).boundingBox();
             await cxtCommand(p3, frame, box.x + 40, box.y + 40, 'Menu', '#menu_select');
             await frame.fill('#menu_select', 'Export Graph JSON');
@@ -623,8 +664,50 @@ async function menuItem(page, scope, item) {
         } catch (e) {
             exportDetail = e.message;
         }
-        check('Studio "Export Graph JSON" shows the graph as JSON', exportOk, exportDetail);
+        if (!STUDIO_ONLY) check('Studio "Export Graph JSON" shows the graph as JSON', exportOk, exportDetail);
 
+        // Features kept in every edition, exercised inside Dashboard Studio.
+        try {
+            const fbox = await (await frame.frameElement()).boundingBox();
+            const hovered = await findNode(p3, frame, { x: fbox.x, y: fbox.y + fbox.height * 0.1, width: fbox.width, height: fbox.height * 0.8 }, null)
+                || await findNode(p3, frame, { x: fbox.x, y: fbox.y + fbox.height * 0.3, width: fbox.width, height: fbox.height * 0.4 }, null);
+            check('Studio: hovering a node or edge shows its details', !!hovered && /Connections:|Count:/.test(hovered.text), hovered ? hovered.text.replace(/\n/g, ' | ') : 'no tooltip');
+            await frame.locator('.lla-tool-search').first().click();
+            await frame.fill('#node_search', 'dc-1');
+            await frame.press('#node_search', 'Enter');
+            await p3.waitForTimeout(1500);
+            check('Studio: toolbar Search finds a node', (await frame.locator('.lla-modal-title').count()) === 0, 'searched dc-1');
+            const scope = frame.locator('body');
+            const menuIn = async (item) => {
+                await frame.locator('.lla-tool-menu').first().click();
+                await frame.fill('#menu_select', item);
+                await frame.click('.lla-modal-footer .btn-primary');
+                await p3.waitForTimeout(1200);
+            };
+            await menuIn('Size by PageRank');
+            const pr = (await scope.locator('.lla-notice').allTextContents()).join(' ');
+            check('Studio: Menu > Size by PageRank', /PageRank/.test(pr), pr);
+            await menuIn('Find Clusters');
+            const cl = await scope.locator('.lla-legend-item', { hasText: 'Cluster' }).count();
+            check('Studio: Menu > Find Clusters', cl > 0, `${cl} clusters`);
+            await menuIn('Filter by Connections');
+            await frame.fill('#lla_min_degree', '3');
+            await frame.click('.lla-modal-footer .btn-primary');
+            await p3.waitForTimeout(800);
+            const fl = (await scope.locator('.lla-notice').allTextContents()).join(' ');
+            check('Studio: Menu > Filter by Connections', /hidden/.test(fl), fl);
+            await menuIn('Clear Filters');
+        } catch (e) {
+            check('Studio: Explorer features (hover, search, analytics, filters)', false, e.message);
+        }
+
+        if (STUDIO_ONLY && !SKIP_KVSTORE) {
+            await rest(`/servicesNS/nobody/${APP}/storage/collections/data/cyto_graphs`, { method: 'POST', json: {
+                graph_id: 'smokeStudioOnly', description: 'smoke studio-only', saved_at: Math.floor(Date.now() / 1000),
+                graph_info: JSON.stringify({ elements: { nodes: [{ data: { id: 'a', label: 'alpha', color: '#1f77b4' }, position: { x: 0, y: 0 } }, { data: { id: 'b', label: 'bravo' }, position: { x: 120, y: 40 } }], edges: [{ data: { id: 'ab', source: 'a', target: 'b' } }] } }),
+            } });
+            globalThis.savedGraphId = 'smokeStudioOnly';
+        }
         if (globalThis.savedGraphId) {
             await p3.goto(`${WEB}/en-US/app/${APP}/link_analysis_historical_view?form.cytoId=${globalThis.savedGraphId}`);
             await p3.waitForTimeout(20000);
@@ -659,6 +742,23 @@ async function menuItem(page, scope, item) {
         }
         check('no page errors on Studio dashboards', errors.length === 0, errors.join(' | '));
         await p3.close();
+    }
+
+    if (STUDIO_ONLY) {
+        const p5 = await context.newPage();
+        const res = await p5.goto(`${WEB}/en-US/app/${APP}/manage_saved_graphs`);
+        await p5.waitForTimeout(4000);
+        const body = await p5.locator('body').innerText();
+        check('studio-only: no Manage Saved Graphs page', !/Import graph/.test(body) && (res.status() === 404 || /not found|could not find|does not exist/i.test(body)), `HTTP ${res.status()}`);
+        const q = encodeURIComponent(SAMPLE);
+        await p5.goto(`${WEB}/en-US/app/${APP}/search?q=${q}&earliest=-15m&latest=now&display.page.search.tab=visualizations&display.general.type=visualizations`);
+        await p5.waitForTimeout(12000);
+        await dismissPopups(p5);
+        await p5.locator('text=Chart:').first().click().catch(() => {});
+        await p5.waitForTimeout(1500);
+        const picker = await p5.locator('body').innerText();
+        check('studio-only: search page does not offer the Studio-only visualization', !/Licoryx Link Analysis(?! App)/.test(picker), (picker.match(/Licoryx[^\n]*/g) || []).join(' | '));
+        await p5.close();
     }
 
     await browser.close();
